@@ -289,7 +289,7 @@ with p_reg:
                 guardar_archivo_nube(n_arc, up_file.getbuffer())
             conn = conectar_bd(); cursor = conn.cursor(); cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc)); conn.commit(); conn.sync(); st.success("Asiento grabado en la nube."); st.rerun()
     st.markdown("---")
-            with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
+        with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             parts_ing = obtener_partidas("Ingreso")
             parts_gas = obtener_partidas("Gasto")
             for idx, row in df_f.iterrows():
