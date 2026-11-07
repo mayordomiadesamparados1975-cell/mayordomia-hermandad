@@ -1,0 +1,462 @@
+import streamlit as st, libsql_experimental as libsql, pandas as pd, io, os, zipfile, base64; from datetime import datetime, date; from operator import itemgetter; from reportlab.lib.pagesizes import letter, landscape; from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table as RLTable, TableStyle, Image as RLImage, PageBreak; from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle; from reportlab.lib import colors
+st.set_page_config(page_title="Hermandad de Ntra. Sra. de los Desamparados", page_icon="⛪", layout="wide")
+st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
+if "autenticado" not in st.session_state: st.session_state.autenticado = False
+if not st.session_state.autenticado:
+    c_l1, c_l2, c_l3 = st.columns((1, 1.5, 1))
+    with c_l2:
+        if os.path.exists("escudo.png"): st.image("escudo.png", width=110)
+        st.markdown("### Acceso Restringido — Mayordomía")
+        clave = st.text_input("Introduce la contraseña de la Junta de Gobierno:", type="password")
+        if st.button("Entrar al Sistema", use_container_width=True):
+            if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
+            else: st.error("Contraseña incorrecta.")
+    st.stop()
+def conectar_bd():
+    conn = libsql.connect("local_replica.db", sync_url=st.secrets["TURSO_DATABASE_URL"], auth_token=st.secrets["TURSO_AUTH_TOKEN"])
+    conn.sync()
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
+    cursor.execute("INSERT OR IGNORE INTO saldos_iniciales (id, caja_inicio, banco_inicio) VALUES (1, 0.0, 0.0)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS presupuestos (partida TEXT PRIMARY KEY, tipo TEXT NOT NULL, importe_presupuestado REAL DEFAULT 0.0)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS archivos_nube (nombre TEXT PRIMARY KEY, datos_b64 TEXT)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS config_sistema (clave TEXT PRIMARY KEY, valor TEXT)")
+    cursor.execute("SELECT valor FROM config_sistema WHERE clave = 'init_partidas'")
+    if not cursor.fetchone():
+        iniciales = [("Ingreso", "Cuotas de Hermanos"), ("Ingreso", "Limosnas y Cepillos"), ("Ingreso", "Papeletas de Sitio"), ("Ingreso", "Venta de Recuerdos"), ("Ingreso", "Lotería"), ("Ingreso", "Donaciones"), ("Gasto", "Caridad y Bolsa Social"), ("Gasto", "Cultos, Cera y Flores"), ("Gasto", "Mantenimiento y Conservación"), ("Gasto", "Música y Acompañamiento"), ("Gasto", "Gastos de Administración")]
+        for t_ini, n_ini in iniciales:
+            cursor.execute("INSERT OR IGNORE INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (t_ini, n_ini))
+        cursor.execute("INSERT INTO config_sistema (clave, valor) VALUES ('init_partidas', '1')")
+    conn.commit(); conn.sync(); return conn
+def obtener_partidas(tipo):
+    conn = conectar_bd(); cursor = conn.cursor()
+    cursor.execute("SELECT nombre FROM partidas_personalizadas WHERE tipo = ? ORDER BY nombre ASC", (tipo,))
+    lista = [itemgetter(0)(f) for f in cursor.fetchall()]
+    return lista if lista else ["General"]
+def guardar_archivo_nube(nombre, bytes_data):
+    conn = conectar_bd(); cur = conn.cursor()
+    b64_str = base64.b64encode(bytes_data).decode('utf-8')
+    cur.execute("INSERT OR REPLACE INTO archivos_nube (nombre, datos_b64) VALUES (?, ?)", (nombre, b64_str))
+    conn.commit(); conn.sync()
+def leer_archivo_nube(nombre):
+    conn = conectar_bd(); cur = conn.cursor()
+    cur.execute("SELECT datos_b64 FROM archivos_nube WHERE nombre = ?", (nombre,))
+    res = cur.fetchone()
+    return base64.b64decode(itemgetter(0)(res)) if res else None
+def borrar_registro(id_reg):
+    conn = conectar_bd(); cursor = conn.cursor(); cursor.execute("SELECT comprobante FROM contabilidad WHERE id = ?", (id_reg,)); arc = cursor.fetchone()
+    if arc and itemgetter(0)(arc):
+        cursor.execute("DELETE FROM archivos_nube WHERE nombre = ?", (itemgetter(0)(arc),))
+    cursor.execute("DELETE FROM contabilidad WHERE id = ?", (id_reg,)); conn.commit(); conn.sync()
+def generar_excel(df):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df.drop(columns=['Comprobante'], errors='ignore').to_excel(writer, index=False, sheet_name='Movimientos')
+    buf.seek(0); return buf
+def marca_agua_vertical(canvas, doc):
+    if os.path.exists("escudo.png"):
+        canvas.saveState(); canvas.setFillAlpha(0.08); canvas.setStrokeAlpha(0.08)
+        canvas.drawImage("escudo.png", 156, 246, width=300, height=300, mask='auto'); canvas.restoreState()
+def marca_agua_horizontal(canvas, doc):
+    if os.path.exists("escudo.png"):
+        canvas.saveState(); canvas.setFillAlpha(0.08); canvas.setStrokeAlpha(0.08)
+        canvas.drawImage("escudo.png", 266, 176, width=260, height=260, mask='auto'); canvas.restoreState()
+def generar_pdf_recibo(row):
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=50, leftMargin=50, topMargin=35, bottomMargin=35); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
+    t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, textColor=burdeos); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=10, leading=14)
+    for i, ej in enumerate(["EJEMPLAR PARA EL INTERESADO", "EJEMPLAR PARA LA HERMANDAD"]):
+        if os.path.exists("escudo.png"):
+            try: img = RLImage("escudo.png", width=95, height=95); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 8))
+            except: pass
+        story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
+        story.append(Paragraph(f"<b>{ej}</b>", ParagraphStyle('SubE', alignment=1, fontSize=10, textColor=burdeos)))
+        sub = "JUSTIFICANTE OFICIAL DE RECAUDACIÓN" if row.get('Tipo') == 'Ingreso' else "DOCUMENTO INTERNO DE PAGO Y RECIBÍ"
+        story.append(Paragraph(sub, ParagraphStyle('S', alignment=1, fontSize=11, textColor=colors.gray))); story.append(Spacer(1, 15))
+        sig = "+" if row.get('Tipo') == 'Ingreso' else "-"
+        t_data = [[Paragraph(f"<b>Nº Asiento:</b> #{row.get('id')}", n_st), Paragraph(f"<b>Fecha:</b> {row.get('Fecha')}", n_st)], [Paragraph(f"<b>Tipo Operación:</b> {row.get('Tipo')}", n_st), Paragraph(f"<b>Cuenta Asignada:</b> {row.get('Cuenta')}", n_st)], [Paragraph(f"<b>Partida Contable:</b> {row.get('Partida')}", n_st), Paragraph(f"<b>Forma Pago:</b> {row.get('Forma Pago')}", n_st)], [Paragraph(f"<b>Detalle / Interesado:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{sig}{row.get('Importe (€)'):,.2f} €</b></font>", n_st)]]
+        t = RLTable(t_data, colWidths=(250, 250)); t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(t); story.append(Spacer(1, 35))
+        if row.get('Tipo') == 'Ingreso': story.append(Paragraph("<b>___________________________</b><br/>Firma y Sello del Mayordomo", ParagraphStyle('F', alignment=1, fontSize=10)))
+        else:
+            tf = RLTable([[Paragraph("<b>___________________________</b><br/>Páguese, El Mayordomo", ParagraphStyle('F1', alignment=1, fontSize=10)), Paragraph("<b>___________________________</b><br/>Recibí, El Beneficiario / Perceptor", ParagraphStyle('F2', alignment=1, fontSize=10))]], colWidths=(250, 250)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
+        if i == 0: story.append(PageBreak())
+    doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+def generar_pdf_resumen(df, titulo_reporte):
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
+    t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=9, leading=12, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=11)
+    if os.path.exists("escudo.png"):
+        try: img = RLImage("escudo.png", width=55, height=55); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 6))
+        except: pass
+    story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st)); story.append(Paragraph(f"Extracto de Cuentas Oficial - {titulo_reporte} | Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_st)); story.append(Spacer(1, 14))
+    t_datos = [[Paragraph("<b><font color='white'>Fecha</font></b>", n_st), Paragraph("<b><font color='white'>Tipo</font></b>", n_st), Paragraph("<b><font color='white'>Cuenta</font></b>", n_st), Paragraph("<b><font color='white'>Partida</font></b>", n_st), Paragraph("<b><font color='white'>Concepto / Detalle</font></b>", n_st), Paragraph("<b><font color='white'>Forma Pago</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_st)]]
+    t_ing, t_gas = 0.0, 0.0
+    for _, f in df.iterrows():
+        v = f.get('Importe (€)'); v_str = f"-{v:,.2f} €" if f.get('Tipo') == 'Gasto' else f"{v:,.2f} €"
+        if f.get('Tipo') == 'Gasto': t_gas += v
+        else: t_ing += v
+        t_datos.append([Paragraph(str(f.get('Fecha'))[:16], n_st), Paragraph(str(f.get('Tipo')), n_st), Paragraph(str(f.get('Cuenta')), n_st), Paragraph(str(f.get('Partida'))[:28], n_st), Paragraph(str(f.get('Concepto'))[:55], n_st), Paragraph(str(f.get('Forma Pago')), n_st), Paragraph(v_str, n_st)])
+    t_datos.append([Paragraph("<b>TOTAL INGRESOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{t_ing:,.2f} €</b>", n_st)])
+    t_datos.append([Paragraph("<b>TOTAL GASTOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>-{t_gas:,.2f} €</b>", n_st)])
+    t_datos.append([Paragraph("<b>RESULTADO NETO DEL EXTRACTO</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{(t_ing - t_gas):,.2f} €</b>", n_st)])
+    t = RLTable(t_datos, colWidths=(75, 45, 45, 120, 250, 115, 70)); t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('BOTTOMPADDING', (0,0), (-1,-1), 4), ('TOPPADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LINEABOVE', (0,-3), (-1,-3), 1.2, burdeos)])); story.append(t); doc.build(story, onFirstPage=marca_agua_horizontal, onLaterPages=marca_agua_horizontal); buf.seek(0); return buf
+def generar_pdf_cierre(df, anio, c_ini, b_ini, c_fin, b_fin):
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
+    t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=16, leading=20, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=10, leading=13, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=11); b_st = ParagraphStyle('B', parent=styles['Normal'], fontSize=9, leading=12)
+    if os.path.exists("escudo.png"):
+        try: img = RLImage("escudo.png", width=65, height=65); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 6))
+        except: pass
+    story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
+    story.append(Paragraph(f"<b>ACTA OFICIAL DE CIERRE DE EJERCICIO CONTABLE — AÑO {anio}</b>", ParagraphStyle('SubC', alignment=1, fontSize=11, textColor=burdeos)))
+    story.append(Paragraph(f"Documento emitido el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_st)); story.append(Spacer(1, 14))
+    t_ing = df.loc[df['Tipo'] == 'Ingreso', 'Importe (€)'].sum(); t_gas = df.loc[df['Tipo'] == 'Gasto', 'Importe (€)'].sum()
+    ing_c = df.loc[(df['Cuenta']=='Caja') & (df['Tipo']=='Ingreso'), 'Importe (€)'].sum(); ing_b = df.loc[(df['Cuenta']=='Banco') & (df['Tipo']=='Ingreso'), 'Importe (€)'].sum()
+    gas_c = df.loc[(df['Cuenta']=='Caja') & (df['Tipo']=='Gasto'), 'Importe (€)'].sum(); gas_b = df.loc[(df['Cuenta']=='Banco') & (df['Tipo']=='Gasto'), 'Importe (€)'].sum()
+    res_data = [[Paragraph("<b><font color='white'>CONCEPTO DE TESORERÍA</font></b>", b_st), Paragraph("<b><font color='white'>CAJA FÍSICA</font></b>", b_st), Paragraph("<b><font color='white'>CUENTA BANCARIA</font></b>", b_st), Paragraph("<b><font color='white'>TOTAL COFRADÍA</font></b>", b_st)], [Paragraph("Saldo Inicial de Apertura", b_st), Paragraph(f"{c_ini:,.2f} €", b_st), Paragraph(f"{b_ini:,.2f} €", b_st), Paragraph(f"{(c_ini + b_ini):,.2f} €", b_st)], [Paragraph("Total Ingresos del Ejercicio", b_st), Paragraph(f"+{ing_c:,.2f} €", b_st), Paragraph(f"+{ing_b:,.2f} €", b_st), Paragraph(f"+{t_ing:,.2f} €", b_st)], [Paragraph("Total Gastos del Ejercicio", b_st), Paragraph(f"-{gas_c:,.2f} €", b_st), Paragraph(f"-{gas_b:,.2f} €", b_st), Paragraph(f"-{t_gas:,.2f} €", b_st)], [Paragraph("<b>SALDO FINAL AL CIERRE (Traspasado a Nuevo Curso)</b>", b_st), Paragraph(f"<b>{c_fin:,.2f} €</b>", b_st), Paragraph(f"<b>{b_fin:,.2f} €</b>", b_st), Paragraph(f"<b>{(c_fin + b_fin):,.2f} €</b>", b_st)]]
+    tr = RLTable(res_data, colWidths=(280, 145, 145, 150)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('PADDING', (0,0), (-1,-1), 6), ('LINEABOVE', (0,-1), (-1,-1), 1.5, burdeos)])); story.append(tr); story.append(Spacer(1, 18))
+    story.append(Paragraph("<b>DETALLE COMPLETO DE MOVIMIENTOS DEL EJERCICIO CERRADO</b>", b_st)); story.append(Spacer(1, 6))
+    t_datos = [[Paragraph("<b><font color='white'>Fecha</font></b>", n_st), Paragraph("<b><font color='white'>Tipo</font></b>", n_st), Paragraph("<b><font color='white'>Cuenta</font></b>", n_st), Paragraph("<b><font color='white'>Partida</font></b>", n_st), Paragraph("<b><font color='white'>Concepto / Detalle</font></b>", n_st), Paragraph("<b><font color='white'>Forma Pago</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_st)]]
+    for _, f in df.sort_values(by="id", ascending=True).iterrows():
+        v = f.get('Importe (€)'); v_str = f"-{v:,.2f} €" if f.get('Tipo') == 'Gasto' else f"{v:,.2f} €"
+        t_datos.append([Paragraph(str(f.get('Fecha'))[:16], n_st), Paragraph(str(f.get('Tipo')), n_st), Paragraph(str(f.get('Cuenta')), n_st), Paragraph(str(f.get('Partida'))[:26], n_st), Paragraph(str(f.get('Concepto'))[:52], n_st), Paragraph(str(f.get('Forma Pago')), n_st), Paragraph(v_str, n_st)])
+    tm = RLTable(t_datos, colWidths=(75, 45, 45, 120, 250, 115, 70)); tm.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tm); story.append(Spacer(1, 35))
+    tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=9)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=9)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=9))]], colWidths=(240, 240, 240)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
+    doc.build(story, onFirstPage=marca_agua_horizontal, onLaterPages=marca_agua_horizontal); buf.seek(0); return buf
+def generar_pdf_presupuesto(df, tipo_comp):
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=35, bottomMargin=35); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
+    t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=9, leading=12, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=9, leading=12)
+    if os.path.exists("escudo.png"):
+        try: img = RLImage("escudo.png", width=65, height=65); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 6))
+        except: pass
+    story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
+    story.append(Paragraph(f"Estado Comparativo Presupuestado vs Ejecutado ({tipo_comp}s)", ParagraphStyle('SubP', alignment=1, fontSize=11, textColor=burdeos)))
+    story.append(Paragraph(f"Documento emitido el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_st)); story.append(Spacer(1, 18))
+    t_datos = [[Paragraph("<b><font color='white'>Partida / Concepto</font></b>", n_st), Paragraph("<b><font color='white'>Presupuestado</font></b>", n_st), Paragraph("<b><font color='white'>Ejecutado</font></b>", n_st), Paragraph("<b><font color='white'>Diferencia</font></b>", n_st)]]
+    for idx, f in df.iterrows():
+        es_tot = (idx == len(df) - 1)
+        p_txt = f"<b>{f.get('Partida')}</b>" if es_tot else str(f.get('Partida'))
+        pr_txt = f"<b>{f.get('Presupuestado (€)'):,.2f} €</b>" if es_tot else f"{f.get('Presupuestado (€)'):,.2f} €"
+        ej_txt = f"<b>{f.get('Ejecutado (€)'):,.2f} €</b>" if es_tot else f"{f.get('Ejecutado (€)'):,.2f} €"
+        df_txt = f"<b>{f.get('Diferencia (€)'):,.2f} €</b>" if es_tot else f"{f.get('Diferencia (€)'):,.2f} €"
+        t_datos.append([Paragraph(p_txt, n_st), Paragraph(pr_txt, n_st), Paragraph(ej_txt, n_st), Paragraph(df_txt, n_st)])
+    t = RLTable(t_datos, colWidths=(230, 100, 100, 100)); t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 6), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LINEABOVE', (0,-1), (-1,-1), 1.5, burdeos)])); story.append(t); story.append(Spacer(1, 45))
+    tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=9)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=9))]], colWidths=(265, 265)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
+    doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+def generar_pdf_presupuesto_global(df_ing, df_gas):
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=30, bottomMargin=30); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
+    t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=14, leading=17, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=8, leading=11, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=10); b_st = ParagraphStyle('B', parent=styles['Normal'], fontSize=9, leading=11)
+    if os.path.exists("escudo.png"):
+        try: img = RLImage("escudo.png", width=55, height=55); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 4))
+        except: pass
+    story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
+    story.append(Paragraph("<b>ESTADO COMPARATIVO PRESUPUESTARIO GLOBAL (CABILDO GENERAL)</b>", ParagraphStyle('SubPG', alignment=1, fontSize=10, textColor=burdeos)))
+    story.append(Paragraph(f"Documento emitido el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_st)); story.append(Spacer(1, 10))
+    for titulo_sec, df_sec in [("1. ESTADO DE INGRESOS", df_ing), ("2. ESTADO DE GASTOS", df_gas)]:
+        story.append(Paragraph(f"<b>{titulo_sec}</b>", b_st)); story.append(Spacer(1, 4))
+        t_datos = [[Paragraph("<b><font color='white'>Partida / Concepto</font></b>", n_st), Paragraph("<b><font color='white'>Presupuestado</font></b>", n_st), Paragraph("<b><font color='white'>Ejecutado</font></b>", n_st), Paragraph("<b><font color='white'>Diferencia</font></b>", n_st)]]
+        for idx, f in df_sec.iterrows():
+            es_tot = (idx == len(df_sec) - 1)
+            p_txt = f"<b>{f.get('Partida')}</b>" if es_tot else str(f.get('Partida'))
+            pr_txt = f"<b>{f.get('Presupuestado (€)'):,.2f} €</b>" if es_tot else f"{f.get('Presupuestado (€)'):,.2f} €"
+            ej_txt = f"<b>{f.get('Ejecutado (€)'):,.2f} €</b>" if es_tot else f"{f.get('Ejecutado (€)'):,.2f} €"
+            df_txt = f"<b>{f.get('Diferencia (€)'):,.2f} €</b>" if es_tot else f"{f.get('Diferencia (€)'):,.2f} €"
+            t_datos.append([Paragraph(p_txt, n_st), Paragraph(pr_txt, n_st), Paragraph(ej_txt, n_st), Paragraph(df_txt, n_st)])
+        t = RLTable(t_datos, colWidths=(230, 100, 100, 100)); t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LINEABOVE', (0,-1), (-1,-1), 1.2, burdeos)])); story.append(t); story.append(Spacer(1, 12))
+    ing_p = float(df_ing.iloc[-1].get('Presupuestado (€)')); ing_e = float(df_ing.iloc[-1].get('Ejecutado (€)'))
+    gas_p = float(df_gas.iloc[-1].get('Presupuestado (€)')); gas_e = float(df_gas.iloc[-1].get('Ejecutado (€)'))
+    res_p = ing_p - gas_p; res_e = ing_e - gas_e; res_d = res_e - res_p
+    story.append(Paragraph("<b>3. RESULTADO PRESUPUESTARIO GLOBAL (INGRESOS - GASTOS)</b>", b_st)); story.append(Spacer(1, 4))
+    t_res = [[Paragraph("<b><font color='white'>CONCEPTO</font></b>", n_st), Paragraph("<b><font color='white'>PRESUPUESTADO</font></b>", n_st), Paragraph("<b><font color='white'>EJECUTADO</font></b>", n_st), Paragraph("<b><font color='white'>DESVIACIÓN</font></b>", n_st)], [Paragraph("<b>SUPERÁVIT / DÉFICIT DEL EJERCICIO</b>", n_st), Paragraph(f"<b>{res_p:,.2f} €</b>", n_st), Paragraph(f"<b>{res_e:,.2f} €</b>", n_st), Paragraph(f"<b>{res_d:,.2f} €</b>", n_st)]]
+    tr = RLTable(t_res, colWidths=(230, 100, 100, 100)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 5), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tr); story.append(Spacer(1, 25))
+    tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
+    doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+conn = conectar_bd(); df_global = pd.read_sql_query("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad ORDER BY id DESC", conn)
+cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
+if s_ini:
+    caja_ini, banco_ini = s_ini
+else:
+    caja_ini, banco_ini = 0.0, 0.0
+img_b64 = ""
+if os.path.exists("escudo.png"):
+    with open("escudo.png", "rb") as f_img: img_b64 = f'<img src="data:image/png;base64,{base64.b64encode(f_img.read()).decode()}" style="height: 75px; margin-right: 15px;">'
+st.markdown(f"<div style='display: flex; align-items: center; justify-content: center; padding: 5px 0;'>{img_b64}<div><h1 style='margin: 0; font-size: 24px; color: #800020;'>Hermandad de Nuestra Señora de los Desamparados</h1><p style='margin: 0; color: #6B7280; font-size: 12px; font-weight: bold; letter-spacing: 1.5px;'>MAYORDOMÍA INSTITUCIONAL (NUBE)</p></div></div>", unsafe_allow_html=True)
+modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=False)
+st.markdown("---")
+if df_global.empty:
+    s_caja, s_banco = caja_ini, banco_ini
+else:
+    s_caja = caja_ini + df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
+    s_banco = banco_ini + df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
+if modo_movil:
+    cm1, cm2 = st.columns(2)
+    cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
+    cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
+    st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
+    st.markdown("---")
+    st.markdown("#### ⚡ Apunte Rápido desde Móvil")
+    m_tipo = st.radio("Operación:", ["Gasto", "Ingreso"], horizontal=True, key="m_tipo")
+    m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
+    m_partida = st.selectbox("Concepto / Partida:", obtener_partidas(m_tipo), key="m_part")
+    m_pago = st.selectbox("Forma de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if m_cuenta == "Caja" else ["Transferencia Bancaria", "Domiciliación Bancaria", "Cargo / Comisión Bancaria"], key="m_pago")
+    m_concepto = st.text_input("Detalle (¿Qué o quién?):", placeholder="Ej: Compra de cera / Limosna", key="m_con")
+    m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
+    m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
+    if st.button("✅ GUARDAR APUNTE AHORA", use_container_width=True, key="m_btn_save"):
+        if not m_concepto.strip(): st.error("Escribe un detalle antes de guardar.")
+        else:
+            n_arc = ""
+            if m_foto is not None:
+                n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
+                guardar_archivo_nube(n_arc, m_foto.getbuffer())
+            conn = conectar_bd(); cur = conn.cursor()
+            cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), m_tipo, m_cuenta, m_partida, m_concepto.strip(), m_pago, m_importe, n_arc))
+            conn.commit(); conn.sync()
+            st.success("¡Apunte registrado en la nube!"); st.rerun()
+    st.markdown("---")
+    st.markdown("##### 🕒 Últimos 5 movimientos")
+    if not df_global.empty:
+        for _, r_m in df_global.head(5).iterrows():
+            col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
+            st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
+    st.stop()
+c1, c2, c3 = st.columns(3); c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €"); c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €"); c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
+st.markdown("---")
+p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
+with p_reg:
+    c_r1, c_r2 = st.columns(2)
+    with c_r1:
+        tipo = st.radio("Tipo de Apunte:", ["Ingreso", "Gasto"], horizontal=True)
+        cuenta = st.radio("Destino / Origen del dinero:", ["Caja", "Banco"], horizontal=True)
+        partida = st.selectbox("Concepto General o Partida:", obtener_partidas(tipo))
+    with c_r2:
+        forma_pago = st.selectbox("Forma o Canal de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if cuenta == "Caja" else ["Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
+        concepto = st.text_input("Detalle específico o datos del Hermano/Beneficiario:", placeholder="Ej: Recibí de Manuel García para cuota anual")
+        importe = st.number_input("Importe del apunte (€):", min_value=0.01, step=5.0, format="%.2f")
+    up_file = st.file_uploader("📷 Adjuntar foto del Ticket o Recibo (Opcional):", type=["png", "jpg", "jpeg", "pdf"])
+    if st.button("Asentar Asiento Contable", use_container_width=True):
+        if not concepto.strip(): st.error("Por favor, añada una descripción o detalle antes de guardar.")
+        else:
+            n_arc = ""
+            if up_file is not None:
+                n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
+                guardar_archivo_nube(n_arc, up_file.getbuffer())
+            conn = conectar_bd(); cursor = conn.cursor(); cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc)); conn.commit(); conn.sync(); st.success("Asiento grabado en la nube."); st.rerun()
+    st.markdown("---")
+    with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
+        st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
+        df_plantilla = pd.DataFrame([
+            {"Referencia": "REM-2026-001", "Hermano": "Manuel García López", "IBAN": "ES9121000418450200051332", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"},
+            {"Referencia": "REM-2026-002", "Hermano": "María del Carmen Ruiz", "IBAN": "ES7600491500051234567892", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"},
+            {"Referencia": "REM-2026-003", "Hermano": "José Antonio Pérez", "IBAN": "ES1001825634120000123456", "Importe": 50.00, "Vencimiento": "2026-11-05", "Estado": "Devuelto"},
+            {"Referencia": "REM-2026-004", "Hermano": "Francisco Javier Díaz", "IBAN": "ES4421001234560100987654", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"}
+        ])
+        st.download_button(label="📥 Descargar Plantilla Excel de Ejemplo (.xlsx)", data=generar_excel(df_plantilla), file_name="Plantilla_Remesa_Ejemplo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
+        if archivo_excel is not None:
+            try:
+                try: df_b = pd.read_excel(archivo_excel, engine="calamine").dropna(how="all")
+                except: df_b = pd.read_excel(archivo_excel).dropna(how="all")
+                cols_b = list(df_b.columns)
+                if len(cols_b) >= 2:
+                    st.markdown("**1. Asigna las columnas de tu archivo Excel:**")
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    col_ref = m1.selectbox("Referencia Banco:", ["(Sin ref)"] + cols_b, index=1 if len(cols_b) > 0 else 0)
+                    col_nom = m2.selectbox("Nombre Hermano:", cols_b, index=min(1, len(cols_b)-1))
+                    col_imp = m3.selectbox("Cuota / Importe (€):", cols_b, index=min(3, len(cols_b)-1))
+                    col_fec = m4.selectbox("Fecha Vencimiento:", cols_b, index=min(4, len(cols_b)-1))
+                    col_est = m5.selectbox("Estado Recibo:", ["(Todos)"] + cols_b, index=min(len(cols_b), 5))
+                    df_val = df_b.copy()
+                    if col_est != "(Todos)":
+                        estados_disp = list(df_val[col_est].dropna().unique())
+                        estados_ok = st.multiselect("2. Selecciona los estados válidos a cobrar (ej. Pagado/Cobrado):", estados_disp, default=estados_disp)
+                        df_val = df_val.loc[df_val[col_est].isin(estados_ok)]
+                    def limpiar_num(val):
+                        if isinstance(val, (int, float)): return float(val)
+                        s = str(val).replace("€", "").replace(" ", "").strip()
+                        if "," in s and "." in s: s = s.replace(".", "").replace(",", ".")
+                        elif "," in s: s = s.replace(",", ".")
+                        try: return float(s)
+                        except: return 0.0
+                    df_val["_imp_limpio"] = df_val[col_imp].apply(limpiar_num)
+                    df_val = df_val.loc[df_val["_imp_limpio"] > 0]
+                    part_remesa = st.selectbox("3. Partida contable donde asentar los recibos:", obtener_partidas("Ingreso"), key="part_remesa")
+                    prefijo_con = st.text_input("Texto inicial del concepto:", value="Cuota domiciliada - ", key="pref_remesa")
+                    def armar_detalle(fila):
+                        n = str(fila.get(col_nom, "")).strip()
+                        c = float(fila.get("_imp_limpio", 0.0))
+                        r_txt = f" [Ref: {str(fila.get(col_ref, '')).strip()}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
+                        return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
+                    df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
+                    st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
+                    df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
+                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
+                    if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
+                        if not df_val.empty:
+                            conn = conectar_bd(); cur = conn.cursor()
+                            for _, r_b in df_val.iterrows():
+                                imp_val = float(r_b.get("_imp_limpio", 0.0))
+                                con_str = str(r_b.get("_concepto_final", ""))
+                                fec_raw = r_b.get(col_fec)
+                                try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
+                                except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                                cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
+                            conn.commit(); conn.sync()
+                            st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
+with p_fil:
+    with st.container(border=True):
+        cf1, cf2, cf3, cf4 = st.columns(4)
+        with cf1: f_cuenta = st.selectbox("Cuenta:", ["Todas", "Caja", "Banco"]); f_tipo = st.selectbox("Tipo:", ["Todos", "Ingreso", "Gasto"])
+        with cf2: f_pago = st.selectbox("Forma Pago:", ["Todas", "Efectivo", "Tarjeta / TPV Físico", "Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
+        with cf3:
+            try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
+            except: r_fechas = date.today()
+        with cf4: f_texto = st.text_input("Buscar Concepto:", placeholder="Ej: Lotería, cuota...")
+    df_f = df_global.copy()
+    if f_cuenta != "Todas": df_f = df_f.loc[df_f['Cuenta'] == f_cuenta]
+    if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
+    if f_pago != "Todas": df_f = df_f.loc[df_f['Forma Pago'] == f_pago]
+    if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False)]
+    if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
+        f_ini_d, f_fin_d = r_fechas
+        df_f = df_f.loc[(df_f['Fecha'] >= f_ini_d.strftime("%Y-%m-%d")) & (df_f['Fecha'] <= (f_fin_d.strftime("%Y-%m-%d") + " 23:59"))]
+    if not df_f.empty:
+        v_ing = df_f.loc[df_f['Tipo'] == 'Ingreso', 'Importe (€)'].sum(); v_gas = df_f.loc[df_f['Tipo'] == 'Gasto', 'Importe (€)'].sum()
+        with st.container(border=True):
+            ct1, ct2, ct3 = st.columns(3)
+            ct1.markdown(f"**Suma Ingresos:** <font color='green'><b>{v_ing:,.2f} €</b></font>", unsafe_allow_html=True)
+            ct2.markdown(f"**Suma Gastos:** <font color='red'><b>-{v_gas:,.2f} €</b></font>", unsafe_allow_html=True)
+            ct3.markdown(f"**Rendimiento Neto:** <b>{(v_ing - v_gas):,.2f} €</b>", unsafe_allow_html=True)
+        cb1, cb2 = st.columns(2)
+        with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
+        with cb2: st.download_button(label="📊 Exportar Listado a Excel (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
+            for idx, row in df_f.iterrows():
+                r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+                with st.container(border=True):
+                    ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
+                    ca.markdown(f"**#{r_id}**")
+                    cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
+                    c_val = "green" if r_tipo == 'Ingreso' else "red"
+                    cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
+                    with cd:
+                        txt_b = "📥 Justificante" if r_tipo == 'Ingreso' else "📄 Imprimir Recibí"
+                        st.download_button(label=txt_b, data=generar_pdf_recibo(row), file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"pdf_{r_id}", use_container_width=True)
+                        if r_com:
+                            datos_adj = leer_archivo_nube(r_com)
+                            if datos_adj: st.download_button(label="📷 Ver Ticket", data=datos_adj, file_name=r_com, key=f"img_{r_id}", use_container_width=True)
+                        with st.popover("✏️ Editar", use_container_width=True):
+                            ed_fec = st.text_input("Fecha:", value=r_fec, key=f"ef_{r_id}")
+                            ed_cue = st.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_cue=="Caja" else 1, key=f"ec_{r_id}")
+                            parts_t = obtener_partidas(r_tipo); idx_p = parts_t.index(r_par) if r_par in parts_t else 0
+                            ed_par = st.selectbox("Partida:", parts_t, index=idx_p, key=f"ep_{r_id}")
+                            ed_con = st.text_input("Concepto:", value=r_con, key=f"econ_{r_id}")
+                            ed_imp = st.number_input("Importe (€):", value=r_imp, min_value=0.01, step=1.0, key=f"ei_{r_id}")
+                            if st.button("Guardar Cambios", key=f"save_{r_id}", use_container_width=True):
+                                conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, r_id)); conn.commit(); conn.sync(); st.rerun()
+                        if st.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True): borrar_registro(r_id); st.rerun()
+    else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
+with p_pre:
+    st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
+    conn = conectar_bd(); df_pres = pd.read_sql_query("SELECT partida, importe_presupuestado FROM presupuestos", conn)
+    dict_pres = dict(zip(df_pres['partida'], df_pres['importe_presupuestado']))
+    col_p1, col_p2 = st.columns((1, 2.3))
+    with col_p1:
+        st.markdown("**Asignar Presupuesto Anual**")
+        p_tipo_sel = st.radio("Tipo de Partida:", ["Ingreso", "Gasto"], horizontal=True, key="pres_tipo")
+        p_sel = st.selectbox("Seleccione Partida:", obtener_partidas(p_tipo_sel), key="pres_part")
+        val_actual_p = float(dict_pres.get(p_sel, 0.0))
+        nuevo_pres = st.number_input("Presupuesto Asignado (€):", min_value=0.0, value=val_actual_p, step=50.0, format="%.2f")
+        if st.button("💾 Fijar Presupuesto", use_container_width=True):
+            conn = conectar_bd(); cur = conn.cursor(); cur.execute("INSERT OR REPLACE INTO presupuestos (partida, tipo, importe_presupuestado) VALUES (?, ?, ?)", (p_sel, p_tipo_sel, nuevo_pres)); conn.commit(); conn.sync(); st.success("Presupuesto actualizado."); st.rerun()
+        st.markdown("---")
+        st.markdown("**🔒 Cierre de Ejercicio Anual**")
+        st.warning("Genera el Acta Oficial en PDF y Excel del año, limpia el libro diario y traspasa el saldo final como fondo inicial del nuevo curso.")
+        anio_cierre = st.text_input("Nombre del Ejercicio a cerrar:", value=str(date.today().year))
+        if st.button("⚠️ EJECUTAR CIERRE ANUAL", use_container_width=True):
+            if not df_global.empty:
+                s_c_fin = caja_ini + df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
+                s_b_fin = banco_ini + df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
+                pdf_cierre_bytes = generar_pdf_cierre(df_global, anio_cierre, caja_ini, banco_ini, s_c_fin, s_b_fin).getvalue()
+                st.session_state["ultimo_pdf_cierre"] = pdf_cierre_bytes
+                st.session_state["ultimo_excel_cierre"] = generar_excel(df_global).getvalue()
+                st.session_state["ultimo_anio_cierre"] = anio_cierre
+                conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio=?, banco_inicio=? WHERE id=1", (s_c_fin, s_b_fin)); cur.execute("DELETE FROM contabilidad"); cur.execute("DELETE FROM archivos_nube"); conn.commit(); conn.sync()
+                st.rerun()
+            else: st.error("No hay apuntes que cerrar.")
+        if "ultimo_pdf_cierre" in st.session_state:
+            st.success(f"✅ Ejercicio {st.session_state['ultimo_anio_cierre']} cerrado. Descarga tus actas:")
+            st.download_button(label=f"🖨️ DESCARGAR ACTA DE CIERRE {st.session_state['ultimo_anio_cierre']} (PDF)", data=st.session_state["ultimo_pdf_cierre"], file_name=f"Acta_Cierre_{st.session_state['ultimo_anio_cierre']}.pdf", mime="application/pdf", use_container_width=True)
+            st.download_button(label=f"📊 DESCARGAR LIBRO DIARIO {st.session_state['ultimo_anio_cierre']} (EXCEL)", data=st.session_state["ultimo_excel_cierre"], file_name=f"Cierre_{st.session_state['ultimo_anio_cierre']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    with col_p2:
+        tablas_tot = dict()
+        for tipo_comp in ["Ingreso", "Gasto"]:
+            icono_t = "📈" if tipo_comp == "Ingreso" else "📉"
+            st.markdown(f"##### {icono_t} Comparativa Presupuestado vs Ejecutado ({tipo_comp}s)")
+            datos_comp = list()
+            for part in obtener_partidas(tipo_comp):
+                pres_v = float(dict_pres.get(part, 0.0))
+                ejec_v = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'] == part), 'Importe (€)'].sum()) if not df_global.empty else 0.0
+                dif_v = (ejec_v - pres_v) if tipo_comp == "Ingreso" else (pres_v - ejec_v)
+                datos_comp.append({"Partida": part, "Presupuestado (€)": pres_v, "Ejecutado (€)": ejec_v, "Diferencia (€)": dif_v})
+            df_comp = pd.DataFrame(datos_comp)
+            tot_p = df_comp["Presupuestado (€)"].sum(); tot_e = df_comp["Ejecutado (€)"].sum(); tot_d = df_comp["Diferencia (€)"].sum()
+            df_tot = pd.concat([df_comp, pd.DataFrame([{"Partida": f"TOTAL {tipo_comp.upper()}S", "Presupuestado (€)": tot_p, "Ejecutado (€)": tot_e, "Diferencia (€)": tot_d}])], ignore_index=True)
+            tablas_tot[tipo_comp] = df_tot
+            st.dataframe(df_tot, use_container_width=True, hide_index=True)
+            c_pdf, c_ex, c_gr = st.columns((1, 1, 1.5))
+            with c_pdf:
+                st.download_button(f"📄 PDF {tipo_comp}s", data=generar_pdf_presupuesto(df_tot, tipo_comp), file_name=f"Presupuestos_{tipo_comp}s.pdf", mime="application/pdf", key=f"btn_pdf_{tipo_comp}", use_container_width=True)
+            with c_ex:
+                st.download_button(f"📥 Excel {tipo_comp}s", data=generar_excel(df_tot), file_name=f"Presupuestos_{tipo_comp}s.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"btn_ex_{tipo_comp}", use_container_width=True)
+            with st.expander(f"📊 Ver Gráfico de {tipo_comp}s", expanded=False):
+                st.bar_chart(df_comp.set_index("Partida")[["Presupuestado (€)", "Ejecutado (€)"]])
+            st.markdown("---")
+        st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
+with p_con:
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        st.markdown("**💰 Fondos Iniciales de Apertura**")
+        caja_inf = st.number_input("Dinero inicial en Caja Física (€):", min_value=0.0, value=float(caja_ini), step=50.0, format="%.2f")
+        banco_inf = st.number_input("Dinero inicial en Cuenta Bancaria (€):", min_value=0.0, value=float(banco_ini), step=50.0, format="%.2f")
+        if st.button("💾 Guardar Saldos Iniciales", use_container_width=True):
+            conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf)); conn.commit(); conn.sync(); st.success("Saldos actualizados."); st.rerun()
+        st.markdown("---")
+        st.markdown("**🛡️ Copia de Seguridad en Excel**")
+        st.download_button(label="💾 DESCARGAR TODOS LOS MOVIMIENTOS (.XLSX)", data=generar_excel(df_global), file_name=f"Backup_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    with col_c2:
+        st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
+        c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
+        c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: Lotería de Navidad")
+        if st.button("Guardar Nueva Partida", use_container_width=True):
+            if not c_nombre.strip(): st.error("Escriba el nombre de la partida.")
+            else:
+                try: conn = conectar_bd(); cur = conn.cursor(); cur.execute("INSERT INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (c_tipo, c_nombre.strip())); conn.commit(); conn.sync(); st.success("Partida añadida."); st.rerun()
+                except: st.error("Este concepto ya existe.")
+        st.markdown("---")
+        st.markdown("**📋 Gestionar Todos los Conceptos (Predeterminados y Nuevos)**")
+        conn = conectar_bd(); df_p = pd.read_sql_query("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre", conn)
+        if df_p.empty: st.caption("No hay partidas registradas.")
+        else:
+            with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=True):
+                for _, r_p in df_p.iterrows():
+                    pid = r_p.get('id'); ptipo = r_p.get('tipo'); pnom = r_p.get('nombre')
+                    with st.container(border=True):
+                        cp1, cp2, cp3 = st.columns((3, 1, 1))
+                        cp1.markdown(f"**{pnom}** <small style='color:gray;'>({ptipo})</small>", unsafe_allow_html=True)
+                        with cp2:
+                            with st.popover("✏️", use_container_width=True):
+                                nuevo_nom = st.text_input("Nuevo nombre:", value=pnom, key=f"ed_p_{pid}")
+                                if st.button("Guardar", key=f"sv_p_{pid}", use_container_width=True):
+                                    if nuevo_nom.strip() and nuevo_nom.strip() != pnom:
+                                        try:
+                                            conn = conectar_bd(); cur = conn.cursor()
+                                            cur.execute("UPDATE partidas_personalizadas SET nombre = ? WHERE id = ?", (nuevo_nom.strip(), pid))
+                                            cur.execute("UPDATE contabilidad SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
+                                            cur.execute("UPDATE presupuestos SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
+                                            conn.commit(); conn.sync(); st.rerun()
+                                        except: st.error("Ya existe un concepto con ese nombre.")
+                        with cp3:
+                            if st.button("❌", key=f"dl_p_{pid}", use_container_width=True):
+                                conn = conectar_bd(); cur = conn.cursor(); cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,)); conn.commit(); conn.sync(); st.rerun()
