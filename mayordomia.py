@@ -324,7 +324,7 @@ with p_reg:
                                 st.session_state.pop(f"pdf_listo_{r_id}", None)
                                 st.rerun()
                         if st.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True): borrar_registro(r_id); st.rerun()
-    else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
+        else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
 with p_pre:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
     conn = conectar_bd(); df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
