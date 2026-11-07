@@ -210,7 +210,7 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tr = RLTable(t_res, colWidths=(230, 100, 100, 100)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 5), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tr); story.append(Spacer(1, 25))
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
-conn = conectar_bd(); df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad ORDER BY id DESC", conn)
+conn = conectar_bd(); df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
 if s_ini:
     caja_ini, banco_ini = s_ini
@@ -399,7 +399,7 @@ with p_fil:
     else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
 with p_pre:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
-    conn = conectar_bd(); df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos", conn)
+    conn = conectar_bd(); df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
     dict_pres = dict(zip(df_pres['partida'], df_pres['importe_presupuestado']))
     col_p1, col_p2 = st.columns((1, 2.3))
     with col_p1:
@@ -476,7 +476,7 @@ with p_con:
                 except: st.error("Este concepto ya existe.")
         st.markdown("---")
         st.markdown("**📋 Gestionar Todos los Conceptos (Predeterminados y Nuevos)**")
-        conn = conectar_bd(); df_p = leer_tabla_turso("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre", conn)
+        conn = conectar_bd(); df_p = leer_tabla_turso("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre")
         if df_p.empty: st.caption("No hay partidas registradas.")
         else:
             with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=True):
