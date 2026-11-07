@@ -1,4 +1,4 @@
-import streamlit as st, libsql_client, pandas as pd, io, os, zipfile, base64; from datetime import datetime, date; from operator import itemgetter; from reportlab.lib.pagesizes import letter, landscape; from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table as RLTable, TableStyle, Image as RLImage, PageBreak; from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle; from reportlab.lib import colors
+import streamlit as st, requests, pandas as pd, io, os, zipfile, base64; from datetime import datetime, date; from operator import itemgetter; from reportlab.lib.pagesizes import letter, landscape; from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table as RLTable, TableStyle, Image as RLImage, PageBreak; from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle; from reportlab.lib import colors
 st.set_page_config(page_title="Hermandad de Ntra. Sra. de los Desamparados", page_icon="⛪", layout="wide")
 st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
@@ -12,32 +12,48 @@ if not st.session_state.autenticado:
             if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
             else: st.error("Contraseña incorrecta.")
     st.stop()
+def ejecutar_turso_http(sql, params=()):
+    url = st.secrets["TURSO_DATABASE_URL"].replace("libsql://", "https://").rstrip("/") + "/v2/pipeline"
+    headers = {"Authorization": f"Bearer {st.secrets['TURSO_AUTH_TOKEN']}", "Content-Type": "application/json"}
+    args = list()
+    for p in params:
+        if p is None: args.append({"type": "null"})
+        elif isinstance(p, int): args.append({"type": "integer", "value": str(p)})
+        elif isinstance(p, float): args.append({"type": "float", "value": p})
+        else: args.append({"type": "text", "value": str(p)})
+    payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
+    r = requests.post(url, json=payload, headers=headers, timeout=15)
+    r.raise_for_status()
+    res = r.json()["results"][0]["response"]["result"]
+    cols = [c["name"] for c in res.get("cols", list())]
+    rows = list()
+    for row in res.get("rows", list()):
+        fila = list()
+        for cell in row:
+            t = cell.get("type")
+            if t == "null": fila.append(None)
+            elif t == "integer": fila.append(int(cell.get("value")))
+            elif t == "float": fila.append(float(cell.get("value")))
+            else: fila.append(cell.get("value"))
+        rows.append(tuple(fila))
+    return cols, rows
 class TursoCursor:
-    def __init__(self, client):
-        self.client = client
+    def __init__(self):
         self.rows = list()
     def execute(self, sql, params=()):
-        res = self.client.execute(sql, list(params))
-        self.rows = [tuple(r) for r in res.rows] if res.rows else list()
+        _, self.rows = ejecutar_turso_http(sql, params)
         return self
     def fetchall(self):
         return self.rows
     def fetchone(self):
         return self.rows[0] if self.rows else None
 class TursoConn:
-    def __init__(self):
-        url = st.secrets["TURSO_DATABASE_URL"].replace("libsql://", "https://")
-        self.client = libsql_client.create_client_sync(url=url, auth_token=st.secrets["TURSO_AUTH_TOKEN"])
-    def cursor(self):
-        return TursoCursor(self.client)
+    def cursor(self): return TursoCursor()
     def commit(self): pass
     def sync(self): pass
 def leer_tabla_turso(sql):
-    conn = conectar_bd(); cur = conn.cursor()
-    res = cur.client.execute(sql)
-    cols = list(res.columns) if res.columns else list()
-    datos = [tuple(r) for r in res.rows] if res.rows else list()
-    return pd.DataFrame(datos, columns=cols)
+    cols, rows = ejecutar_turso_http(sql)
+    return pd.DataFrame(rows, columns=cols)
 def conectar_bd():
     conn = TursoConn(); cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
