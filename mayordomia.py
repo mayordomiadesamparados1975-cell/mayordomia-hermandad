@@ -1,4 +1,4 @@
-import streamlit as st, libsql, pandas as pd, io, os, zipfile, base64; from datetime import datetime, date; from operator import itemgetter; from reportlab.lib.pagesizes import letter, landscape; from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table as RLTable, TableStyle, Image as RLImage, PageBreak; from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle; from reportlab.lib import colors
+import streamlit as st, libsql_client, pandas as pd, io, os, zipfile, base64; from datetime import datetime, date; from operator import itemgetter; from reportlab.lib.pagesizes import letter, landscape; from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table as RLTable, TableStyle, Image as RLImage, PageBreak; from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle; from reportlab.lib import colors
 st.set_page_config(page_title="Hermandad de Ntra. Sra. de los Desamparados", page_icon="⛪", layout="wide")
 st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
@@ -12,10 +12,34 @@ if not st.session_state.autenticado:
             if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
             else: st.error("Contraseña incorrecta.")
     st.stop()
+class TursoCursor:
+    def __init__(self, client):
+        self.client = client
+        self.rows = list()
+    def execute(self, sql, params=()):
+        res = self.client.execute(sql, list(params))
+        self.rows = [tuple(r) for r in res.rows] if res.rows else list()
+        return self
+    def fetchall(self):
+        return self.rows
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+class TursoConn:
+    def __init__(self):
+        url = st.secrets["TURSO_DATABASE_URL"].replace("libsql://", "https://")
+        self.client = libsql_client.create_client_sync(url=url, auth_token=st.secrets["TURSO_AUTH_TOKEN"])
+    def cursor(self):
+        return TursoCursor(self.client)
+    def commit(self): pass
+    def sync(self): pass
+def leer_tabla_turso(sql):
+    conn = conectar_bd(); cur = conn.cursor()
+    res = cur.client.execute(sql)
+    cols = list(res.columns) if res.columns else list()
+    datos = [tuple(r) for r in res.rows] if res.rows else list()
+    return pd.DataFrame(datos, columns=cols)
 def conectar_bd():
-    conn = libsql.connect("local_replica.db", sync_url=st.secrets["TURSO_DATABASE_URL"], auth_token=st.secrets["TURSO_AUTH_TOKEN"])
-    conn.sync()
-    cursor = conn.cursor()
+    conn = TursoConn(); cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
     cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
@@ -29,7 +53,7 @@ def conectar_bd():
         for t_ini, n_ini in iniciales:
             cursor.execute("INSERT OR IGNORE INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (t_ini, n_ini))
         cursor.execute("INSERT INTO config_sistema (clave, valor) VALUES ('init_partidas', '1')")
-    conn.commit(); conn.sync(); return conn
+    return conn
 def obtener_partidas(tipo):
     conn = conectar_bd(); cursor = conn.cursor()
     cursor.execute("SELECT nombre FROM partidas_personalizadas WHERE tipo = ? ORDER BY nombre ASC", (tipo,))
@@ -39,7 +63,6 @@ def guardar_archivo_nube(nombre, bytes_data):
     conn = conectar_bd(); cur = conn.cursor()
     b64_str = base64.b64encode(bytes_data).decode('utf-8')
     cur.execute("INSERT OR REPLACE INTO archivos_nube (nombre, datos_b64) VALUES (?, ?)", (nombre, b64_str))
-    conn.commit(); conn.sync()
 def leer_archivo_nube(nombre):
     conn = conectar_bd(); cur = conn.cursor()
     cur.execute("SELECT datos_b64 FROM archivos_nube WHERE nombre = ?", (nombre,))
@@ -49,7 +72,7 @@ def borrar_registro(id_reg):
     conn = conectar_bd(); cursor = conn.cursor(); cursor.execute("SELECT comprobante FROM contabilidad WHERE id = ?", (id_reg,)); arc = cursor.fetchone()
     if arc and itemgetter(0)(arc):
         cursor.execute("DELETE FROM archivos_nube WHERE nombre = ?", (itemgetter(0)(arc),))
-    cursor.execute("DELETE FROM contabilidad WHERE id = ?", (id_reg,)); conn.commit(); conn.sync()
+    cursor.execute("DELETE FROM contabilidad WHERE id = ?", (id_reg,))
 def generar_excel(df):
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
@@ -170,7 +193,7 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tr = RLTable(t_res, colWidths=(230, 100, 100, 100)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 5), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tr); story.append(Spacer(1, 25))
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
-conn = conectar_bd(); df_global = pd.read_sql_query("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad ORDER BY id DESC", conn)
+conn = conectar_bd(); df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad ORDER BY id DESC", conn)
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
 if s_ini:
     caja_ini, banco_ini = s_ini
@@ -359,7 +382,7 @@ with p_fil:
     else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
 with p_pre:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
-    conn = conectar_bd(); df_pres = pd.read_sql_query("SELECT partida, importe_presupuestado FROM presupuestos", conn)
+    conn = conectar_bd(); df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos", conn)
     dict_pres = dict(zip(df_pres['partida'], df_pres['importe_presupuestado']))
     col_p1, col_p2 = st.columns((1, 2.3))
     with col_p1:
@@ -436,7 +459,7 @@ with p_con:
                 except: st.error("Este concepto ya existe.")
         st.markdown("---")
         st.markdown("**📋 Gestionar Todos los Conceptos (Predeterminados y Nuevos)**")
-        conn = conectar_bd(); df_p = pd.read_sql_query("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre", conn)
+        conn = conectar_bd(); df_p = leer_tabla_turso("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre", conn)
         if df_p.empty: st.caption("No hay partidas registradas.")
         else:
             with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=True):
