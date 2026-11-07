@@ -51,7 +51,7 @@ class TursoCursor:
     def fetchall(self):
         return self.rows
     def fetchone(self):
-        return self.rows if self.rows else None
+        return itemgetter(0)(self.rows) if self.rows else None
 class TursoConn:
     def cursor(self): return TursoCursor()
     def commit(self): pass
