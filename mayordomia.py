@@ -29,7 +29,7 @@ def ejecutar_turso_http(sql, params=()):
     payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
     r = obtener_sesion_http().post(url, json=payload, timeout=15)
     r.raise_for_status()
-    res = r.json()["results"]["response"]["result"]
+    res = itemgetter(0)(r.json()["results"]["response"]["result"]
     cols = [c["name"] for c in res.get("cols", list())]
     rows = list()
     for row in res.get("rows", list()):
