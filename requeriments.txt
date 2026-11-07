@@ -3,4 +3,4 @@ pandas
 reportlab
 openpyxl
 python-calamine
-libsql
+libsql-client
