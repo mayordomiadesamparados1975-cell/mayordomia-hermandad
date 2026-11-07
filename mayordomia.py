@@ -13,9 +13,13 @@ if not st.session_state.autenticado:
             if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
             else: st.error("Contraseña incorrecta.")
     st.stop()
+@st.cache_resource
+def obtener_sesion_http():
+    s = requests.Session()
+    s.headers.update({"Authorization": f"Bearer {st.secrets['TURSO_AUTH_TOKEN']}", "Content-Type": "application/json"})
+    return s
 def ejecutar_turso_http(sql, params=()):
     url = st.secrets["TURSO_DATABASE_URL"].replace("libsql://", "https://").rstrip("/") + "/v2/pipeline"
-    headers = {"Authorization": f"Bearer {st.secrets['TURSO_AUTH_TOKEN']}", "Content-Type": "application/json"}
     args = list()
     for p in params:
         if p is None: args.append({"type": "null"})
@@ -23,9 +27,9 @@ def ejecutar_turso_http(sql, params=()):
         elif isinstance(p, float): args.append({"type": "float", "value": p})
         else: args.append({"type": "text", "value": str(p)})
     payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
-    r = requests.post(url, json=payload, headers=headers, timeout=15)
+    r = obtener_sesion_http().post(url, json=payload, timeout=15)
     r.raise_for_status()
-    res = r.json()["results"][0]["response"]["result"]
+    res = r.json()["results"]["response"]["result"]
     cols = [c["name"] for c in res.get("cols", list())]
     rows = list()
     for row in res.get("rows", list()):
@@ -47,7 +51,7 @@ class TursoCursor:
     def fetchall(self):
         return self.rows
     def fetchone(self):
-        return self.rows[0] if self.rows else None
+        return self.rows if self.rows else None
 class TursoConn:
     def cursor(self): return TursoCursor()
     def commit(self): pass
@@ -56,20 +60,23 @@ def leer_tabla_turso(sql):
     cols, rows = ejecutar_turso_http(sql)
     return pd.DataFrame(rows, columns=cols)
 def conectar_bd():
-    conn = TursoConn(); cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
-    cursor.execute("INSERT OR IGNORE INTO saldos_iniciales (id, caja_inicio, banco_inicio) VALUES (1, 0.0, 0.0)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS presupuestos (partida TEXT PRIMARY KEY, tipo TEXT NOT NULL, importe_presupuestado REAL DEFAULT 0.0)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS archivos_nube (nombre TEXT PRIMARY KEY, datos_b64 TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS config_sistema (clave TEXT PRIMARY KEY, valor TEXT)")
-    cursor.execute("SELECT valor FROM config_sistema WHERE clave = 'init_partidas'")
-    if not cursor.fetchone():
-        iniciales = [("Ingreso", "Cuotas de Hermanos"), ("Ingreso", "Limosnas y Cepillos"), ("Ingreso", "Papeletas de Sitio"), ("Ingreso", "Venta de Recuerdos"), ("Ingreso", "Lotería"), ("Ingreso", "Donaciones"), ("Gasto", "Caridad y Bolsa Social"), ("Gasto", "Cultos, Cera y Flores"), ("Gasto", "Mantenimiento y Conservación"), ("Gasto", "Música y Acompañamiento"), ("Gasto", "Gastos de Administración")]
-        for t_ini, n_ini in iniciales:
-            cursor.execute("INSERT OR IGNORE INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (t_ini, n_ini))
-        cursor.execute("INSERT INTO config_sistema (clave, valor) VALUES ('init_partidas', '1')")
+    conn = TursoConn()
+    if "bd_inicializada" not in st.session_state:
+        cursor = conn.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
+        cursor.execute("INSERT OR IGNORE INTO saldos_iniciales (id, caja_inicio, banco_inicio) VALUES (1, 0.0, 0.0)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS presupuestos (partida TEXT PRIMARY KEY, tipo TEXT NOT NULL, importe_presupuestado REAL DEFAULT 0.0)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS archivos_nube (nombre TEXT PRIMARY KEY, datos_b64 TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS config_sistema (clave TEXT PRIMARY KEY, valor TEXT)")
+        cursor.execute("SELECT valor FROM config_sistema WHERE clave = 'init_partidas'")
+        if not cursor.fetchone():
+            iniciales = [("Ingreso", "Cuotas de Hermanos"), ("Ingreso", "Limosnas y Cepillos"), ("Ingreso", "Papeletas de Sitio"), ("Ingreso", "Venta de Recuerdos"), ("Ingreso", "Lotería"), ("Ingreso", "Donaciones"), ("Gasto", "Caridad y Bolsa Social"), ("Gasto", "Cultos, Cera y Flores"), ("Gasto", "Mantenimiento y Conservación"), ("Gasto", "Música y Acompañamiento"), ("Gasto", "Gastos de Administración")]
+            for t_ini, n_ini in iniciales:
+                cursor.execute("INSERT OR IGNORE INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (t_ini, n_ini))
+            cursor.execute("INSERT INTO config_sistema (clave, valor) VALUES ('init_partidas', '1')")
+        st.session_state.bd_inicializada = True
     return conn
 def obtener_partidas(tipo):
     conn = conectar_bd(); cursor = conn.cursor()
