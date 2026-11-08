@@ -1,4 +1,4 @@
-import streamlit as st, requests, pandas as pd, io, os, zipfile, base64
+import streamlit as st, requests, pandas as pd, io, os, zipfile, base64, json
 from datetime import datetime, date
 from operator import itemgetter
 from reportlab.lib.pagesizes import letter, landscape
@@ -75,7 +75,9 @@ def conectar_bd():
     conn = TursoConn()
     if "bd_inicializada" not in st.session_state:
         cursor = conn.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0)")
+        try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN eliminado INTEGER DEFAULT 0")
+        except: pass
         cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
         cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
         cursor.execute("INSERT OR IGNORE INTO saldos_iniciales (id, caja_inicio, banco_inicio) VALUES (1, 0.0, 0.0)")
@@ -109,6 +111,14 @@ def leer_archivo_nube(nombre):
     return base64.b64decode(itemgetter(0)(res)) if res else None
 
 def borrar_registro(id_reg):
+    conn = conectar_bd(); cursor = conn.cursor()
+    cursor.execute("UPDATE contabilidad SET eliminado = 1 WHERE id = ?", (id_reg,))
+
+def restaurar_registro(id_reg):
+    conn = conectar_bd(); cursor = conn.cursor()
+    cursor.execute("UPDATE contabilidad SET eliminado = 0 WHERE id = ?", (id_reg,))
+
+def borrar_definitivo(id_reg):
     conn = conectar_bd(); cursor = conn.cursor(); cursor.execute("SELECT comprobante FROM contabilidad WHERE id = ?", (id_reg,)); arc = cursor.fetchone()
     if arc and itemgetter(0)(arc):
         cursor.execute("DELETE FROM archivos_nube WHERE nombre = ?", (itemgetter(0)(arc),))
@@ -119,6 +129,39 @@ def generar_excel(df):
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
         df.drop(columns=['Comprobante'], errors='ignore').to_excel(writer, index=False, sheet_name='Movimientos')
     buf.seek(0); return buf
+def generar_backup_zip():
+    buf = io.BytesIO()
+    tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema"]
+    respaldo = {}
+    for t in tablas:
+        cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
+        respaldo[t] = {"cols": cols, "rows": rows}
+    _, archivos = ejecutar_turso_http("SELECT nombre, datos_b64 FROM archivos_nube")
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("datos_hermandad.json", json.dumps(respaldo, ensure_ascii=False, indent=2))
+        for nom, b64 in archivos:
+            if nom and b64:
+                zf.writestr(f"tickets/{nom}", base64.b64decode(b64))
+    buf.seek(0)
+    return buf
+
+def restaurar_backup_zip(archivo_zip):
+    with zipfile.ZipFile(archivo_zip, "r") as zf:
+        respaldo = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
+        for t in ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "archivos_nube"]:
+            ejecutar_turso_http(f"DELETE FROM {t}")
+        for t, contenido in respaldo.items():
+            cols = contenido["cols"]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            for fila in contenido["rows"]:
+                ejecutar_turso_http(f"INSERT INTO {t} ({col_names}) VALUES ({placeholders})", tuple(fila))
+        for item in zf.namelist():
+            if item.startswith("tickets/") and not item.endswith("/"):
+                nom_real = item.replace("tickets/", "", 1)
+                b64_str = base64.b64encode(zf.read(item)).decode("utf-8")
+                ejecutar_turso_http("INSERT OR REPLACE INTO archivos_nube (nombre, datos_b64) VALUES (?, ?)", (nom_real, b64_str))
+
 def marca_agua_vertical(canvas, doc):
     if os.path.exists("escudo.png"):
         canvas.saveState(); canvas.setFillAlpha(0.08); canvas.setStrokeAlpha(0.08)
@@ -238,7 +281,7 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 conn = conectar_bd()
-df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad ORDER BY id DESC")
+df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
 if s_ini:
     caja_ini, banco_ini = s_ini
@@ -506,14 +549,35 @@ with p_pre:
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        st.markdown("**💰 Fondos Iniciales de Apertura**")
-        caja_inf = st.number_input("Dinero inicial en Caja Física (€):", min_value=0.0, value=float(caja_ini), step=50.0, format="%.2f")
-        banco_inf = st.number_input("Dinero inicial en Cuenta Bancaria (€):", min_value=0.0, value=float(banco_ini), step=50.0, format="%.2f")
-        if st.button("💾 Guardar Saldos Iniciales", use_container_width=True):
-            conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf)); conn.commit(); conn.sync(); st.success("Saldos actualizados."); st.rerun()
+                st.markdown("---")
+        st.markdown("**🛡️ Copias de Seguridad y Restauración**")
+        st.download_button(label="📦 DESCARGAR BACKUP INTEGRAL (.ZIP CON TICKETS)", data=generar_backup_zip(), file_name=f"Backup_Integral_Desamparados_{datetime.now().strftime('%Y%m%d_%H%M')}.zip", mime="application/zip", use_container_width=True)
+        st.download_button(label="📊 Exportar Solo Movimientos (.XLSX)", data=generar_excel(df_global), file_name=f"Movimientos_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with st.expander("⏪ Restaurar Base de Datos desde Backup (.ZIP)", expanded=False):
+            st.warning("⚠️ Atención: Al restaurar un archivo .ZIP se reemplazarán todos los datos actuales por los de la copia.")
+            zip_subido = st.file_uploader("Selecciona el archivo Backup_Integral (.zip):", type=["zip"], key="up_zip_restore")
+            if zip_subido is not None:
+                if st.button("🔄 CONFIRMAR Y RESTAURAR AHORA", use_container_width=True):
+                    try:
+                        restaurar_backup_zip(zip_subido)
+                        st.success("¡Base de datos y tickets restaurados correctamente!"); st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al restaurar el backup: {e}")
         st.markdown("---")
-        st.markdown("**🛡️ Copia de Seguridad en Excel**")
-        st.download_button(label="💾 DESCARGAR TODOS LOS MOVIMIENTOS (.XLSX)", data=generar_excel(df_global), file_name=f"Backup_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        df_pap = leer_tabla_turso("SELECT id, fecha, tipo, origen_destino, partida, concepto, importe FROM contabilidad WHERE eliminado = 1 ORDER BY id DESC")
+        with st.expander(f"🗑️ Papelera de Reciclaje ({len(df_pap)} apuntes borrados)", expanded=False):
+            if df_pap.empty:
+                st.caption("La papelera está vacía.")
+            else:
+                for _, rp in df_pap.iterrows():
+                    pid_b = rp.get("id")
+                    with st.container(border=True):
+                        st.markdown(f"**#{pid_b}** | {rp.get('partida')} — {rp.get('concepto')} (**{float(rp.get('importe')):,.2f} €**)<br/><small style='color:gray;'>{rp.get('fecha')} | {rp.get('origen_destino')}</small>", unsafe_allow_html=True)
+                        b_res, b_del = st.columns(2)
+                        if b_res.button("♻️ Restaurar", key=f"rest_{pid_b}", use_container_width=True):
+                            restaurar_registro(pid_b); st.rerun()
+                        if b_del.button("🔥 Borrar Definitivo", key=f"pdel_{pid_b}", use_container_width=True):
+                            borrar_definitivo(pid_b); st.rerun()
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
