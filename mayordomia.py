@@ -326,7 +326,10 @@ if os.path.exists("escudo.png"):
     with open("escudo.png", "rb") as f_img: img_b64 = f'<img src="data:image/png;base64,{base64.b64encode(f_img.read()).decode()}" style="height: 75px; margin-right: 15px;">'
 st.markdown(f"<div style='display: flex; align-items: center; justify-content: center; padding: 5px 0;'>{img_b64}<div><h1 style='margin: 0; font-size: 24px; color: #800020;'>Hermandad de Nuestra Señora de los Desamparados</h1><p style='margin: 0; color: #6B7280; font-size: 12px; font-weight: bold; letter-spacing: 1.5px;'>MAYORDOMÍA INSTITUCIONAL (NUBE)</p></div></div>", unsafe_allow_html=True)
 
-modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=False)
+_ua = st.context.headers.get("User-Agent", "").lower() if hasattr(st, "context") else ""
+_es_movil = any(k in _ua for k in ("android", "iphone", "ipad", "mobile"))
+modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=_es_movil)
+
 st.markdown("---")
 
 if df_global.empty:
