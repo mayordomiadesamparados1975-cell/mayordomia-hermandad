@@ -161,7 +161,36 @@ def restaurar_backup_zip(archivo_zip):
                 nom_real = item.replace("tickets/", "", 1)
                 b64_str = base64.b64encode(zf.read(item)).decode("utf-8")
                 ejecutar_turso_http("INSERT OR REPLACE INTO archivos_nube (nombre, datos_b64) VALUES (?, ?)", (nom_real, b64_str))
-
+def mostrar_panel_respaldos(df_global):
+    st.markdown("---")
+    st.markdown("**🛡️ Copias de Seguridad y Restauración**")
+    st.download_button(label="📦 DESCARGAR BACKUP INTEGRAL (.ZIP CON TICKETS)", data=generar_backup_zip(), file_name=f"Backup_Integral_Desamparados_{datetime.now().strftime('%Y%m%d_%H%M')}.zip", mime="application/zip", use_container_width=True)
+    st.download_button(label="📊 Exportar Solo Movimientos (.XLSX)", data=generar_excel(df_global), file_name=f"Movimientos_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    with st.expander("⏪ Restaurar Base de Datos desde Backup (.ZIP)", expanded=False):
+        st.warning("⚠️ Atención: Al restaurar un archivo .ZIP se reemplazarán todos los datos actuales por los de la copia.")
+        zip_subido = st.file_uploader("Selecciona el archivo Backup_Integral (.zip):", type=["zip"], key="up_zip_restore")
+        if zip_subido is not None:
+            if st.button("🔄 CONFIRMAR Y RESTAURAR AHORA", use_container_width=True):
+                try:
+                    restaurar_backup_zip(zip_subido)
+                    st.success("¡Base de datos y tickets restaurados correctamente!"); st.rerun()
+                except Exception as e:
+                    st.error(f"Error al restaurar el backup: {e}")
+    st.markdown("---")
+    df_pap = leer_tabla_turso("SELECT id, fecha, tipo, origen_destino, partida, concepto, importe FROM contabilidad WHERE eliminado = 1 ORDER BY id DESC")
+    with st.expander(f"🗑️ Papelera de Reciclaje ({len(df_pap)} apuntes borrados)", expanded=False):
+        if df_pap.empty:
+            st.caption("La papelera está vacía.")
+        else:
+            for _, rp in df_pap.iterrows():
+                pid_b = rp.get("id")
+                with st.container(border=True):
+                    st.markdown(f"**#{pid_b}** | {rp.get('partida')} — {rp.get('concepto')} (**{float(rp.get('importe')):,.2f} €**)<br/><small style='color:gray;'>{rp.get('fecha')} | {rp.get('origen_destino')}</small>", unsafe_allow_html=True)
+                    b_res, b_del = st.columns(2)
+                    if b_res.button("♻️ Restaurar", key=f"rest_{pid_b}", use_container_width=True):
+                        restaurar_registro(pid_b); st.rerun()
+                    if b_del.button("🔥 Borrar Definitivo", key=f"pdel_{pid_b}", use_container_width=True):
+                        borrar_definitivo(pid_b); st.rerun()
 def marca_agua_vertical(canvas, doc):
     if os.path.exists("escudo.png"):
         canvas.saveState(); canvas.setFillAlpha(0.08); canvas.setStrokeAlpha(0.08)
@@ -549,35 +578,12 @@ with p_pre:
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-                        st.markdown("---")
-        st.markdown("**🛡️ Copias de Seguridad y Restauración**")
-        st.download_button(label="📦 DESCARGAR BACKUP INTEGRAL (.ZIP CON TICKETS)", data=generar_backup_zip(), file_name=f"Backup_Integral_Desamparados_{datetime.now().strftime('%Y%m%d_%H%M')}.zip", mime="application/zip", use_container_width=True)
-        st.download_button(label="📊 Exportar Solo Movimientos (.XLSX)", data=generar_excel(df_global), file_name=f"Movimientos_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        with st.expander("⏪ Restaurar Base de Datos desde Backup (.ZIP)", expanded=False):
-            st.warning("⚠️ Atención: Al restaurar un archivo .ZIP se reemplazarán todos los datos actuales por los de la copia.")
-            zip_subido = st.file_uploader("Selecciona el archivo Backup_Integral (.zip):", type=["zip"], key="up_zip_restore")
-            if zip_subido is not None:
-                if st.button("🔄 CONFIRMAR Y RESTAURAR AHORA", use_container_width=True):
-                    try:
-                        restaurar_backup_zip(zip_subido)
-                        st.success("¡Base de datos y tickets restaurados correctamente!"); st.rerun()
-                    except Exception as e:
-                        st.error(f"Error al restaurar el backup: {e}")
-        st.markdown("---")
-        df_pap = leer_tabla_turso("SELECT id, fecha, tipo, origen_destino, partida, concepto, importe FROM contabilidad WHERE eliminado = 1 ORDER BY id DESC")
-        with st.expander(f"🗑️ Papelera de Reciclaje ({len(df_pap)} apuntes borrados)", expanded=False):
-            if df_pap.empty:
-                st.caption("La papelera está vacía.")
-            else:
-                for _, rp in df_pap.iterrows():
-                    pid_b = rp.get("id")
-                    with st.container(border=True):
-                        st.markdown(f"**#{pid_b}** | {rp.get('partida')} — {rp.get('concepto')} (**{float(rp.get('importe')):,.2f} €**)<br/><small style='color:gray;'>{rp.get('fecha')} | {rp.get('origen_destino')}</small>", unsafe_allow_html=True)
-                        b_res, b_del = st.columns(2)
-                        if b_res.button("♻️ Restaurar", key=f"rest_{pid_b}", use_container_width=True):
-                            restaurar_registro(pid_b); st.rerun()
-                        if b_del.button("🔥 Borrar Definitivo", key=f"pdel_{pid_b}", use_container_width=True):
-                            borrar_definitivo(pid_b); st.rerun()
+        st.markdown("**💰 Fondos Iniciales de Apertura**")
+        caja_inf = st.number_input("Dinero inicial en Caja Física (€):", min_value=0.0, value=float(caja_ini), step=50.0, format="%.2f")
+        banco_inf = st.number_input("Dinero inicial en Cuenta Bancaria (€):", min_value=0.0, value=float(banco_ini), step=50.0, format="%.2f")
+        if st.button("💾 Guardar Saldos Iniciales", use_container_width=True):
+            conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf)); conn.commit(); conn.sync(); st.success("Saldos actualizados."); st.rerun()
+        mostrar_panel_respaldos(df_global)
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
