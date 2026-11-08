@@ -7,6 +7,10 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 st.set_page_config(page_title="Hermandad de Ntra. Sra. de los Desamparados", page_icon="escudo.png", layout="wide")
+if os.path.exists("escudo.png"):
+    with open("escudo.png", "rb") as _f:
+        _ico_b64 = base64.b64encode(_f.read()).decode()
+    st.markdown(f'<link rel="apple-touch-icon" href="data:image/png;base64,{_ico_b64}"><link rel="icon" sizes="192x192" href="data:image/png;base64,{_ico_b64}">', unsafe_allow_html=True)
 st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
 
 if "autenticado" not in st.session_state: st.session_state.autenticado = False
