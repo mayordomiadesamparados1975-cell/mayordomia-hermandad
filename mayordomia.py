@@ -549,7 +549,7 @@ with p_pre:
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-                st.markdown("---")
+                        st.markdown("---")
         st.markdown("**🛡️ Copias de Seguridad y Restauración**")
         st.download_button(label="📦 DESCARGAR BACKUP INTEGRAL (.ZIP CON TICKETS)", data=generar_backup_zip(), file_name=f"Backup_Integral_Desamparados_{datetime.now().strftime('%Y%m%d_%H%M')}.zip", mime="application/zip", use_container_width=True)
         st.download_button(label="📊 Exportar Solo Movimientos (.XLSX)", data=generar_excel(df_global), file_name=f"Movimientos_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
