@@ -550,43 +550,9 @@ with p_fil:
             ct3.markdown(f"**Rendimiento Neto:** <b>{(v_ing - v_gas):,.2f} €</b>", unsafe_allow_html=True)
         cb1, cb2 = st.columns(2)
         with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
-        with cb2: st.download_button(label="📊 Exportar Listado a Excel (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with cb2: st.download_button(label="📊 Exportar Solo Movimientos (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             mostrar_listado_movimientos(df_f)
-            parts_ing = obtener_partidas("Ingreso")
-            parts_gas = obtener_partidas("Gasto")
-            for idx, row in df_f.iterrows():
-                r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
-                with st.container(border=True):
-                    ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
-                    ca.markdown(f"**#{r_id}**")
-                    cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
-                    c_val = "green" if r_tipo == 'Ingreso' else "red"
-                    cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
-                    with cd:
-                        txt_b = "📥 Preparar Justificante" if r_tipo == 'Ingreso' else "📄 Preparar Recibí"
-                        if st.button(txt_b, key=f"prep_pdf_{r_id}", use_container_width=True):
-                            st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
-                        if f"pdf_listo_{r_id}" in st.session_state:
-                            st.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
-                        if r_com:
-                            if st.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
-                                st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
-                            if st.session_state.get(f"img_lista_{r_id}"):
-                                st.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)
-                        with st.popover("✏️ Editar", use_container_width=True):
-                            ed_fec = st.text_input("Fecha:", value=r_fec, key=f"ef_{r_id}")
-                            ed_cue = st.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_cue=="Caja" else 1, key=f"ec_{r_id}")
-                            parts_t = parts_ing if r_tipo == "Ingreso" else parts_gas
-                            idx_p = parts_t.index(r_par) if r_par in parts_t else 0
-                            ed_par = st.selectbox("Partida:", parts_t, index=idx_p, key=f"ep_{r_id}")
-                            ed_con = st.text_input("Concepto:", value=r_con, key=f"econ_{r_id}")
-                            ed_imp = st.number_input("Importe (€):", value=r_imp, min_value=0.01, step=1.0, key=f"ei_{r_id}")
-                            if st.button("Guardar Cambios", key=f"save_{r_id}", use_container_width=True):
-                                conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, r_id)); conn.commit(); conn.sync()
-                                st.session_state.pop(f"pdf_listo_{r_id}", None)
-                                st.rerun()
-                        if st.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True): borrar_registro(r_id); st.rerun()
     else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
 with p_pre:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
