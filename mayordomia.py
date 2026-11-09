@@ -459,7 +459,11 @@ with p_reg:
         archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
         if archivo_excel is not None:
             try:
+                            try:
                 df_b = pd.read_excel(archivo_excel, engine="openpyxl").dropna(how="all")
+            except:
+                df_b = pd.read_excel(archivo_excel, engine="xlrd").dropna(how="all")
+
                 cols_b = list(df_b.columns)
                 if len(cols_b) >= 2:
                     st.markdown("**1. Asigna las columnas de tu archivo Excel:**")
