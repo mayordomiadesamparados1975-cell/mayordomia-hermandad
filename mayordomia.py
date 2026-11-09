@@ -96,7 +96,61 @@ def conectar_bd():
             cursor.execute("INSERT INTO config_sistema (clave, valor) VALUES ('init_partidas', '1')")
         st.session_state.bd_inicializada = True
     return conn
-
+def procesar_panel_remesas(archivo_excel):
+    try:
+        try:
+            df_b = pd.read_excel(archivo_excel, engine="openpyxl").dropna(how="all")
+        except:
+            df_b = pd.read_excel(archivo_excel, engine="xlrd").dropna(how="all")
+        
+        cols_b = list(df_b.columns)
+        if len(cols_b) >= 2:
+            st.markdown("**1. Asigna las columnas de tu archivo Excel:**")
+            m1, m2, m3, m4, m5 = st.columns(5)
+            col_ref = m1.selectbox("Referencia Banco:", ["(Sin ref)"] + cols_b, index=1 if len(cols_b) > 0 else 0)
+            col_nom = m2.selectbox("Nombre Hermano:", cols_b, index=min(1, len(cols_b)-1))
+            col_imp = m3.selectbox("Cuota / Importe (€):", cols_b, index=min(3, len(cols_b)-1))
+            col_fec = m4.selectbox("Fecha Vencimiento:", cols_b, index=min(4, len(cols_b)-1))
+            col_est = m5.selectbox("Estado Recibo:", ["(Todos)"] + cols_b, index=min(len(cols_b), 5))
+            df_val = df_b.copy()
+            if col_est != "(Todos)":
+                estados_disp = list(df_val[col_est].dropna().unique())
+                estados_ok = st.multiselect("2. Selecciona los estados válidos a cobrar (ej. Pagado/Cobrado):", estados_disp, default=estados_disp)
+                df_val = df_val.loc[df_val[col_est].isin(estados_ok)]
+            def limpiar_num(val):
+                if isinstance(val, (int, float)): return float(val)
+                s = str(val).replace("€", "").replace(" ", "").strip()
+                if "," in s and "." in s: s = s.replace(".", "").replace(",", ".")
+                elif "," in s: s = s.replace(",", ".")
+                try: return float(s)
+                except: return 0.0
+            df_val["_imp_limpio"] = df_val[col_imp].apply(limpiar_num)
+            df_val = df_val.loc[df_val["_imp_limpio"] > 0]
+            part_remesa = st.selectbox("3. Partida contable donde asentar los recibos:", obtener_partidas("Ingreso"), key="part_remesa")
+            prefijo_con = st.text_input("Texto inicial del concepto:", value="Cuota domiciliada - ", key="pref_remesa")
+            def armar_detalle(fila):
+                n = str(fila.get(col_nom, "")).strip()
+                c = float(fila.get("_imp_limpio", 0.0))
+                r_txt = f" [Ref: {str(fila.get(col_ref, ''))).strip()}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
+                return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
+            df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
+            st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
+            df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
+            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+            if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
+                if not df_val.empty:
+                    conn = conectar_bd(); cur = conn.cursor()
+                    for _, r_b in df_val.iterrows():
+                        imp_val = float(r_b.get("_imp_limpio", 0.0))
+                        con_str = str(r_b.get("_concepto_final", ""))
+                        fec_raw = r_b.get(col_fec)
+                        try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
+                        except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
+                    conn.commit(); conn.sync()
+                    st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
+    except Exception as e:
+        st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
 def obtener_partidas(tipo):
     conn = conectar_bd(); cursor = conn.cursor()
     cursor.execute("SELECT nombre FROM partidas_personalizadas WHERE tipo = ? ORDER BY nombre ASC", (tipo,))
@@ -447,69 +501,15 @@ with p_reg:
             conn.commit(); conn.sync()
             st.success("Asiento grabado en la nube."); st.rerun()
     st.markdown("---")
-    with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
+        with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
         st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
         df_plantilla = pd.DataFrame([
-            {"Referencia": "REM-2026-001", "Hermano": "Manuel García López", "IBAN": "ES9121000418450200051332", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"},
-            {"Referencia": "REM-2026-002", "Hermano": "María del Carmen Ruiz", "IBAN": "ES7600491500051234567892", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"},
-            {"Referencia": "REM-2026-003", "Hermano": "José Antonio Pérez", "IBAN": "ES1001825634120000123456", "Importe": 50.00, "Vencimiento": "2026-11-05", "Estado": "Devuelto"},
-            {"Referencia": "REM-2026-004", "Hermano": "Francisco Javier Díaz", "IBAN": "ES4421001234560100987654", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"}
+            {"Referencia": "REM-2026-001", "Hermano": "Manuel García López", "IBAN": "ES9121000418450200051332", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"}
         ])
         st.download_button(label="📥 Descargar Plantilla Excel de Ejemplo (.xlsx)", data=generar_excel(df_plantilla), file_name="Plantilla_Remesa_Ejemplo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
         if archivo_excel is not None:
-            try:
-                            try:
-                df_b = pd.read_excel(archivo_excel, engine="openpyxl").dropna(how="all")
-            except:
-                df_b = pd.read_excel(archivo_excel, engine="xlrd").dropna(how="all")
-
-                cols_b = list(df_b.columns)
-                if len(cols_b) >= 2:
-                    st.markdown("**1. Asigna las columnas de tu archivo Excel:**")
-                    m1, m2, m3, m4, m5 = st.columns(5)
-                    col_ref = m1.selectbox("Referencia Banco:", ["(Sin ref)"] + cols_b, index=1 if len(cols_b) > 0 else 0)
-                    col_nom = m2.selectbox("Nombre Hermano:", cols_b, index=min(1, len(cols_b)-1))
-                    col_imp = m3.selectbox("Cuota / Importe (€):", cols_b, index=min(3, len(cols_b)-1))
-                    col_fec = m4.selectbox("Fecha Vencimiento:", cols_b, index=min(4, len(cols_b)-1))
-                    col_est = m5.selectbox("Estado Recibo:", ["(Todos)"] + cols_b, index=min(len(cols_b), 5))
-                    df_val = df_b.copy()
-                    if col_est != "(Todos)":
-                        estados_disp = list(df_val[col_est].dropna().unique())
-                        estados_ok = st.multiselect("2. Selecciona los estados válidos a cobrar (ej. Pagado/Cobrado):", estados_disp, default=estados_disp)
-                        df_val = df_val.loc[df_val[col_est].isin(estados_ok)]
-                    def limpiar_num(val):
-                        if isinstance(val, (int, float)): return float(val)
-                        s = str(val).replace("€", "").replace(" ", "").strip()
-                        if "," in s and "." in s: s = s.replace(".", "").replace(",", ".")
-                        elif "," in s: s = s.replace(",", ".")
-                        try: return float(s)
-                        except: return 0.0
-                    df_val["_imp_limpio"] = df_val[col_imp].apply(limpiar_num)
-                    df_val = df_val.loc[df_val["_imp_limpio"] > 0]
-                    part_remesa = st.selectbox("3. Partida contable donde asentar los recibos:", obtener_partidas("Ingreso"), key="part_remesa")
-                    prefijo_con = st.text_input("Texto inicial del concepto:", value="Cuota domiciliada - ", key="pref_remesa")
-                    def armar_detalle(fila):
-                        n = str(fila.get(col_nom, "")).strip()
-                        c = float(fila.get("_imp_limpio", 0.0))
-                        r_txt = f" [Ref: {str(fila.get(col_ref, '')).strip()}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
-                        return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
-                    df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
-                    st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
-                    df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
-                    st.dataframe(df_preview, use_container_width=True, hide_index=True)
-                    if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
-                        if not df_val.empty:
-                            conn = conectar_bd(); cur = conn.cursor()
-                            for _, r_b in df_val.iterrows():
-                                imp_val = float(r_b.get("_imp_limpio", 0.0))
-                                con_str = str(r_b.get("_concepto_final", ""))
-                                fec_raw = r_b.get(col_fec)
-                                try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
-                                except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                                cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
-                            conn.commit(); conn.sync()
-                            st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
+            procesar_panel_remesas(archivo_excel)
             except Exception as e:
                 st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
 with p_fil:
