@@ -501,7 +501,7 @@ with p_reg:
             conn.commit(); conn.sync()
             st.success("Asiento grabado en la nube."); st.rerun()
     st.markdown("---")
-        with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
+    with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
         st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
         df_plantilla = pd.DataFrame([
             {"Referencia": "REM-2026-001", "Hermano": "Manuel García López", "IBAN": "ES9121000418450200051332", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"}
@@ -510,8 +510,6 @@ with p_reg:
         archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
         if archivo_excel is not None:
             procesar_panel_remesas(archivo_excel)
-            except Exception as e:
-                st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
 with p_fil:
     with st.container(border=True):
         cf1, cf2, cf3, cf4 = st.columns(4)
