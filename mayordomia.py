@@ -329,8 +329,6 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 def dibujar_tabla_movimientos(df_f):
-    p_ing = obtener_partidas("Ingreso")
-    p_gas = obtener_partidas("Gasto")
     for idx, row in df_f.iterrows():
         r_id = row.get('id')
         r_tipo = row.get('Tipo')
@@ -348,7 +346,6 @@ def dibujar_tabla_movimientos(df_f):
             c_val = "green" if r_tipo == 'Ingreso' else "red"
             cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
             
-            # Botones directos en la columna de control sin bloques anidados
             txt_b = "📥 Preparar Justificante" if r_tipo == 'Ingreso' else "📄 Preparar Recibí"
             if cd.button(txt_b, key=f"prep_pdf_{r_id}", use_container_width=True):
                 st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
@@ -359,33 +356,8 @@ def dibujar_tabla_movimientos(df_f):
                     st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
                 if st.session_state.get(f"img_lista_{r_id}"):
                     cd.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)
-            
-            # Creamos el botón de edición y guardamos su contenedor de forma plana
-            form_ed = cd.popover("✏️ Editar", use_container_width=True)
-            if cd.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True):
+            if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
                 borrar_registro(r_id)
-                st.rerun()
-            
-            # Dibujamos el formulario asociándolo directamente al botón sin usar 'with'
-            ed_fec = form_ed.text_input("Fecha:", value=r_fec, key=f"ef_{r_id}")
-            ed_cue = form_ed.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_cue=="Caja" else 1, key=f"ec_{r_id}")
-            p_t = p_ing if r_tipo == "Ingreso" else p_gas
-            idx_p = p_t.index(r_par) if r_par in p_t else 0
-            ed_par = form_ed.selectbox("Partida:", p_t, index=idx_p, key=f"ep_{r_id}")
-            ed_con = form_ed.text_input("Concepto:", value=r_con, key=f"econ_{r_id}")
-            ed_imp = form_ed.number_input("Importe (€):", value=r_imp, min_value=0.01, step=1.0, key=f"ei_{r_id}")
-            ed_file = form_ed.file_uploader("📷 Cambiar/Añadir foto:", type=["png", "jpg", "jpeg", "pdf"], key=f"eup_{r_id}")
-            
-            if form_ed.button("Guardar Cambios", key=f"save_{r_id}", use_container_width=True):
-                n_arc = r_com
-                if ed_file is not None:
-                    n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
-                    guardar_archivo_nube(n_arc, ed_file.getbuffer())
-                conn = conectar_bd(); cur = conn.cursor()
-                cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, n_arc, r_id))
-                conn.commit(); conn.sync()
-                st.session_state.pop(f"pdf_listo_{r_id}", None)
-                st.session_state.pop(f"img_lista_{r_id}", None)
                 st.rerun()
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
@@ -545,6 +517,36 @@ with p_fil:
             try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
             except: r_fechas = date.today()
         with cf4: f_texto = st.text_input("Buscar Concepto:", placeholder="Ej: Lotería, cuota...")
+    
+    # NUEVO: Panel de Edición unificado sin sangrías complejas
+    with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
+        st.caption("Introduce el número de asiento (ej: 14) para modificarlo o adjuntarle una imagen/ticket.")
+        id_a_editar = st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed")
+        if id_a_editar:
+            df_buscado = df_global.loc[df_global['id'] == id_a_editar]
+            if not df_buscado.empty:
+                r_edit = df_buscado.iloc[0]
+                c_ed1, c_ed2 = st.columns(2)
+                ed_fec = c_ed1.text_input("Fecha:", value=str(r_edit.get('Fecha')), key="cef_fec")
+                ed_cue = c_ed1.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_edit.get('Cuenta')=="Caja" else 1, key="cef_cue")
+                p_t_op = obtener_partidas("Ingreso") if r_edit.get('Tipo') == "Ingreso" else obtener_partidas("Gasto")
+                idx_p_op = p_t_op.index(r_edit.get('Partida')) if r_edit.get('Partida') in p_t_op else 0
+                ed_par = c_ed1.selectbox("Partida:", p_t_op, index=idx_p_op, key="cef_par")
+                ed_con = c_ed2.text_input("Concepto:", value=str(r_edit.get('Concepto')), key="cef_con")
+                ed_imp = c_ed2.number_input("Importe (€):", value=float(r_edit.get('Importe (€)')), min_value=0.01, step=1.0, key="cef_imp")
+                ed_file = c_ed2.file_uploader("📷 Añadir o Cambiar Foto del Ticket/Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="cef_file")
+                if st.button("💾 GUARDAR CAMBIOS EN EL ASIENTO", use_container_width=True, key="cef_btn_save"):
+                    n_arc = r_edit.get('Comprobante') if r_edit.get('Comprobante') else ""
+                    if ed_file is not None:
+                        n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
+                        guardar_archivo_nube(n_arc, ed_file.getbuffer())
+                    conn = conectar_bd(); cur = conn.cursor()
+                    cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, n_arc, id_a_editar))
+                    conn.commit(); conn.sync()
+                    st.success("¡Asiento actualizado correctamente!"); st.rerun()
+            else:
+                st.caption("Introduce un número de asiento válido para ver sus datos.")
+
     df_f = df_global.copy()
     if f_cuenta != "Todas": df_f = df_f.loc[df_f['Cuenta'] == f_cuenta]
     if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
@@ -553,6 +555,7 @@ with p_fil:
     if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
         f_ini_d, f_fin_d = r_fechas
         df_f = df_f.loc[(df_f['Fecha'] >= f_ini_d.strftime("%Y-%m-%d")) & (df_f['Fecha'] <= (f_fin_d.strftime("%Y-%m-%d") + " 23:59"))]
+    
     if not df_f.empty:
         v_ing = df_f.loc[df_f['Tipo'] == 'Ingreso', 'Importe (€)'].sum(); v_gas = df_f.loc[df_f['Tipo'] == 'Gasto', 'Importe (€)'].sum()
         with st.container(border=True):
