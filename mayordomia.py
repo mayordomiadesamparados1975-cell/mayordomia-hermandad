@@ -131,7 +131,7 @@ def procesar_panel_remesas(archivo_excel):
             def armar_detalle(fila):
                 n = str(fila.get(col_nom, "")).strip()
                 c = float(fila.get("_imp_limpio", 0.0))
-                r_txt = f" [Ref: {str(fila.get(col_ref, ''))).strip()}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
+                r_txt = f" [Ref: {str(fila.get(col_ref, '')).strip()}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
                 return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
             df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
             st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
