@@ -627,17 +627,31 @@ with p_con:
                         cp1, cp2, cp3 = st.columns((3, 1, 1))
                         cp1.markdown(f"**{pnom}** <small style='color:gray;'>({ptipo})</small>", unsafe_allow_html=True)
                         with cp2:
-                            with st.popover("✏️", use_container_width=True):
-                                nuevo_nom = st.text_input("Nuevo nombre:", value=pnom, key=f"ed_p_{pid}")
-                                if st.button("Guardar", key=f"sv_p_{pid}", use_container_width=True):
-                                    if nuevo_nom.strip() and nuevo_nom.strip() != pnom:
-                                        try:
-                                            conn = conectar_bd(); cur = conn.cursor()
-                                            cur.execute("UPDATE partidas_personalizadas SET nombre = ? WHERE id = ?", (nuevo_nom.strip(), pid))
-                                            cur.execute("UPDATE contabilidad SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
-                                            cur.execute("UPDATE presupuestos SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
-                                            conn.commit(); conn.sync(); st.rerun()
-                                        except: st.error("Ya existe un concepto con ese nombre.")
+                                                    with st.popover("✏️ Editar", use_container_width=True):
+                            ed_fec = st.text_input("Fecha:", value=r_fec, key=f"ef_{r_id}")
+                            ed_cue = st.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_cue=="Caja" else 1, key=f"ec_{r_id}")
+                            parts_t = parts_ing if r_tipo == "Ingreso" else parts_gas
+                            idx_p = parts_t.index(r_par) if r_par in parts_t else 0
+                            ed_par = st.selectbox("Partida:", parts_t, index=idx_p, key=f"ep_{r_id}")
+                            ed_con = st.text_input("Concepto:", value=r_con, key=f"econ_{r_id}")
+                            ed_imp = st.number_input("Importe (€):", value=r_imp, min_value=0.01, step=1.0, key=f"ei_{r_id}")
+                            
+                            # NUEVO: Permitir añadir o cambiar la imagen/ticket del apunte
+                            ed_file = st.file_uploader("📷 Cambiar/Añadir foto del Ticket o Recibo:", type=["png", "jpg", "jpeg", "pdf"], key=f"eup_{r_id}")
+                            
+                            if st.button("Guardar Cambios", key=f"save_{r_id}", use_container_width=True):
+                                n_arc = r_com # Mantenemos el nombre actual por defecto
+                                if ed_file is not None:
+                                    # Generamos un nombre único para el nuevo archivo
+                                    n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
+                                    guardar_archivo_nube(n_arc, ed_file.getbuffer())
+                                
+                                conn = conectar_bd(); cur = conn.cursor()
+                                cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, n_arc, r_id))
+                                conn.commit(); conn.sync()
+                                st.session_state.pop(f"pdf_listo_{r_id}", None)
+                                st.session_state.pop(f"img_lista_{r_id}", None) # Limpiamos la caché de la imagen vieja
+                                st.rerun()
                         with cp3:
                             if st.button("❌", key=f"dl_p_{pid}", use_container_width=True):
                                 conn = conectar_bd(); cur = conn.cursor(); cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,)); conn.commit(); conn.sync(); st.rerun()
