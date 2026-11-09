@@ -328,6 +328,53 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tr = RLTable(t_res, colWidths=(230, 100, 100, 100)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 5), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tr); story.append(Spacer(1, 25))
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+def mostrar_listado_movimientos(df_f):
+    parts_ing = obtener_partidas("Ingreso")
+    parts_gas = obtener_partidas("Gasto")
+    for idx, row in df_f.iterrows():
+        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+        with st.container(border=True):
+            ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
+            ca.markdown(f"**#{r_id}**")
+            cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
+            c_val = "green" if r_tipo == 'Ingreso' else "red"
+            cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
+            with cd:
+                txt_b = "📥 Preparar Justificante" if r_tipo == 'Ingreso' else "📄 Preparar Recibí"
+                if st.button(txt_b, key=f"prep_pdf_{r_id}", use_container_width=True):
+                    st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
+                if f"pdf_listo_{r_id}" in st.session_state:
+                    st.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
+                if r_com:
+                    if st.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
+                        st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
+                    if st.session_state.get(f"img_lista_{r_id}"):
+                        st.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)  
+                with st.popover("✏️ Editar", use_container_width=True):
+                    ed_fec = st.text_input("Fecha:", value=r_fec, key=f"ef_{r_id}")
+                    ed_cue = st.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_cue=="Caja" else 1, key=f"ec_{r_id}")
+                    parts_t = parts_ing if r_tipo == "Ingreso" else parts_gas
+                    idx_p = parts_t.index(r_par) if r_par in parts_t else 0
+                    ed_par = st.selectbox("Partida:", parts_t, index=idx_p, key=f"ep_{r_id}")
+                    ed_con = st.text_input("Concepto:", value=r_con, key=f"econ_{r_id}")
+                    ed_imp = st.number_input("Importe (€):", value=r_imp, min_value=0.01, step=1.0, key=f"ei_{r_id}")
+                    ed_file = st.file_uploader("📷 Cambiar/Añadir foto del Ticket o Recibo:", type=["png", "jpg", "jpeg", "pdf"], key=f"eup_{r_id}")
+                    
+                    if st.button("Guardar Cambios", key=f"save_{r_id}", use_container_width=True):
+                        n_arc = r_com
+                        if ed_file is not None:
+                            n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
+                            guardar_archivo_nube(n_arc, ed_file.getbuffer())
+                        conn = conectar_bd(); cur = conn.cursor()
+                        cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, n_arc, r_id))
+                        conn.commit(); conn.sync()
+                        st.session_state.pop(f"pdf_listo_{r_id}", None)
+                        st.session_state.pop(f"img_lista_{r_id}", None)
+                        st.rerun()
+                
+                if st.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True):
+                    borrar_registro(r_id)
+                    st.rerun()
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
