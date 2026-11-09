@@ -552,6 +552,7 @@ with p_fil:
         with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
         with cb2: st.download_button(label="📊 Exportar Listado a Excel (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
+            mostrar_listado_movimientos(df_f)
             parts_ing = obtener_partidas("Ingreso")
             parts_gas = obtener_partidas("Gasto")
             for idx, row in df_f.iterrows():
