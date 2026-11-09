@@ -332,7 +332,15 @@ def dibujar_tabla_movimientos(df_f):
     parts_ing = obtener_partidas("Ingreso")
     parts_gas = obtener_partidas("Gasto")
     for idx, row in df_f.iterrows():
-        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+        r_id = row.get('id')
+        r_tipo = row.get('Tipo')
+        r_cue = row.get('Cuenta')
+        r_par = row.get('Partida')
+        r_con = row.get('Concepto')
+        r_fec = row.get('Fecha')
+        r_pag = row.get('Forma Pago')
+        r_imp = float(row.get('Importe (€)'))
+        r_com = row.get('Comprobante')
         with st.container(border=True):
             ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
             ca.markdown(f"**#{r_id}**")
@@ -370,7 +378,9 @@ def dibujar_tabla_movimientos(df_f):
                         st.session_state.pop(f"pdf_listo_{r_id}", None)
                         st.session_state.pop(f"img_lista_{r_id}", None)
                         st.rerun()
-                if st.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True): borrar_registro(r_id); st.rerun()
+                if st.button("❌ Eliminar", key=f"del_{r_id}", use_container_width=True):
+                    borrar_registro(r_id)
+                    st.rerun()
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
