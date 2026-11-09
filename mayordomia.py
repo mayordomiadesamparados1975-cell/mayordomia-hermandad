@@ -214,10 +214,25 @@ def generar_pdf_recibo(row):
             except: pass
         story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
         story.append(Paragraph(f"<b>{ej}</b>", ParagraphStyle('SubE', alignment=1, fontSize=10, textColor=burdeos)))
-        sub = "JUSTIFICANTE OFICIAL DE RECAUDACIÓN" if row.get('Tipo') == 'Ingreso' else "DOCUMENTO INTERNO DE PAGO Y RECIBÍ"
+        
+        # Cambiamos el título según sea un ingreso o un pago a proveedor
+        if row.get('Tipo') == 'Ingreso':
+            sub = "JUSTIFICANTE OFICIAL DE RECAUDACIÓN"
+        else:
+            sub = "ORDEN DE PAGO A PROVEEDOR / ACREEDOR"
+            
         story.append(Paragraph(sub, ParagraphStyle('S', alignment=1, fontSize=11, textColor=colors.gray))); story.append(Spacer(1, 15))
-        sig = "+" if row.get('Tipo') == 'Ingreso' else "-"
-        t_data = [[Paragraph(f"<b>Nº Asiento:</b> #{row.get('id')}", n_st), Paragraph(f"<b>Fecha:</b> {row.get('Fecha')}", n_st)], [Paragraph(f"<b>Tipo Operación:</b> {row.get('Tipo')}", n_st), Paragraph(f"<b>Cuenta Asignada:</b> {row.get('Cuenta')}", n_st)], [Paragraph(f"<b>Partida Contable:</b> {row.get('Partida')}", n_st), Paragraph(f"<b>Forma Pago:</b> {row.get('Forma Pago')}", n_st)], [Paragraph(f"<b>Detalle / Interesado:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{sig}{row.get('Importe (€)'):,.2f} €</b></font>", n_st)]]
+        
+        # Forzamos a que el importe siempre sea positivo en el papel (usando abs())
+        importe_positivo = abs(float(row.get('Importe (€)', 0.0)))
+        
+        t_data = [
+            [Paragraph(f"<b>Nº Asiento:</b> #{row.get('id')}", n_st), Paragraph(f"<b>Fecha:</b> {row.get('Fecha')}", n_st)], 
+            [Paragraph(f"<b>Tipo Operación:</b> {row.get('Tipo')}", n_st), Paragraph(f"<b>Cuenta Asignada:</b> {row.get('Cuenta')}", n_st)], 
+            [Paragraph(f"<b>Partida Contable:</b> {row.get('Partida')}", n_st), Paragraph(f"<b>Forma Pago:</b> {row.get('Forma Pago')}", n_st)], 
+            [Paragraph(f"<b>Detalle / Interesado:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{importe_positivo:,.2f} €</b></font>", n_st)]
+        ]
+        
         t = RLTable(t_data, colWidths=(250, 250)); t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(t); story.append(Spacer(1, 35))
         if row.get('Tipo') == 'Ingreso': story.append(Paragraph("<b>___________________________</b><br/>Firma y Sello del Mayordomo", ParagraphStyle('F', alignment=1, fontSize=10)))
         else:
