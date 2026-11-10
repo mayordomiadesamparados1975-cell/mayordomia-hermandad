@@ -513,17 +513,27 @@ with p_reg:
         concepto = st.text_input("Detalle específico o datos del Hermano/Beneficiario:", placeholder="Ej: Recibí de Manuel García para cuota anual")
         importe = st.number_input("Importe del apunte (€):", min_value=0.01, step=5.0, format="%.2f")
     up_file = st.file_uploader("📷 Adjuntar foto del Ticket o Recibo (Opcional):", type=["png", "jpg", "jpeg", "pdf"])
-    if st.button("Asentar Asiento Contable", use_container_width=True):
-        if not concepto.strip(): st.error("Por favor, añada una descripción o detalle antes de guardar.")
-        else:
-            n_arc = ""
-            if up_file is not None:
-                n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
-                guardar_archivo_nube(n_arc, up_file.getbuffer())
-            conn = conectar_bd(); cursor = conn.cursor()
-            cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc))
-            conn.commit(); conn.sync()
-            st.success("Asiento grabado en la nube."); st.rerun()
+        # Comprobamos si hay algún bloqueo activo antes de dejar usar el botón
+    bloqueo_msg = comprobar_bloqueo_concurrencia(quien_opera)
+    
+    if bloqueo_msg:
+        st.warning(bloqueo_msg)
+        st.button("🔒 GUARDADO DESACTIVADO TEMPORALMENTE", disabled=True, use_container_width=True)
+    else:
+        if st.button("Asentar Asiento Contable", use_container_width=True):
+            if not concepto.strip(): 
+                st.error("Por favor, añada una descripción o detalle antes de guardar.")
+            else:
+                # Registramos que esta persona toma el control del sistema
+                registrar_presencia_usuario(quien_opera, "Registro Manual")
+                n_arc = ""
+                if up_file is not None:
+                    n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
+                    guardar_archivo_nube(n_arc, up_file.getbuffer())
+                conn = conectar_bd(); cursor = conn.cursor()
+                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc))
+                conn.commit(); conn.sync()
+                st.success("Asiento grabado en la nube."); st.rerun()
     st.markdown("---")
     with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
         st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
