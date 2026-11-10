@@ -494,10 +494,30 @@ tr_out_b = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Banco', 'import
 s_caja = caja_ini + ing_caja - gas_caja + tr_in_c - tr_out_c
 s_banco = banco_ini + ing_banco - gas_banco + tr_in_b - tr_out_b
 # --- FIN DEL REEMPLAZO DE LA CABECERA ---
+# --- RECUPERACIÓN DE LA CABECERA INSTITUCIONAL, ESCUDO Y SALDOS METRICOS ---
 if "usr_activo" not in st.session_state: 
     st.session_state.usr_activo = "Mayordomo"
+
+# 1. Dibujamos el Escudo y el Título de la Hermandad en la parte superior
+img_b64 = ""
+if os.path.exists("escudo.png"):
+    with open("escudo.png", "rb") as f_img: 
+        img_b64 = f'<img src="data:image/png;base64,{base64.b64encode(f_img.read()).decode()}" style="height: 75px; margin-right: 15px;">'
+st.markdown(f"<div style='display: flex; align-items: center; justify-content: center; padding: 5px 0;'>{img_b64}<div><h1 style='margin: 0; font-size: 24px; color: #800020;'>Hermandad de Nuestra Señora de los Desamparados</h1><p style='margin: 0; color: #6B7280; font-size: 12px; font-weight: bold; letter-spacing: 1.5px;'>MAYORDOMÍA INSTITUCIONAL (NUBE)</p></div></div>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# 2. Pintamos en grande las tres Tarjetas Métricas con los saldos calculados en tiempo real
+c1, c2, c3 = st.columns(3)
+c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
+c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
+c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
+st.markdown("---")
+
+# 3. Selector de control de concurrencia obligatoria
 quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
 st.markdown("---")
+# --- FIN DE LA CABECERA ---
 
 # --- DECLARACIÓN OFICIAL DE LAS PESTAÑAS DEL PROGRAMA ---
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
