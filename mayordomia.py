@@ -456,53 +456,44 @@ if s_ini:
 else:
     caja_ini, banco_ini = 0.0, 0.0
 
-img_b64 = ""
-if os.path.exists("escudo.png"):
-    with open("escudo.png", "rb") as f_img: img_b64 = f'<img src="data:image/png;base64,{base64.b64encode(f_img.read()).decode()}" style="height: 75px; margin-right: 15px;">'
-st.markdown(f"<div style='display: flex; align-items: center; justify-content: center; padding: 5px 0;'>{img_b64}<div><h1 style='margin: 0; font-size: 24px; color: #800020;'>Hermandad de Nuestra Señora de los Desamparados</h1><p style='margin: 0; color: #6B7280; font-size: 12px; font-weight: bold; letter-spacing: 1.5px;'>MAYORDOMÍA INSTITUCIONAL (NUBE)</p></div></div>", unsafe_allow_html=True)
-
-_ua = st.context.headers.get("User-Agent", "").lower() if hasattr(st, "context") else ""
-_es_movil = any(k in _ua for k in ("android", "iphone", "ipad", "mobile"))
-modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=_es_movil)
-
-# Selector centralizado en la cabecera para bloquear accesos cruzados
-quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
-st.markdown("---")
-
-# --- REGENERACIÓN COMPLETA DEL MOTOR DE SALDOS REALES EN PANTALLA ---
+# --- REGENERACIÓN COMPLETA Y REPARADA DE SALDOS REALES ---
 if "usr_activo" not in st.session_state: 
     st.session_state.usr_activo = "Mayordomo"
 
-# 1. Cargamos las tablas de movimientos y traspasos reales desde la nube
-df_reales_calc = leer_tabla_turso("SELECT tipo, origen_destino, importe, COALESCE(pendiente, 0) as 'pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0")
+# Leemos los traspasos de fondos directamente desde la nube
 df_traspasos_calc = leer_tabla_turso("SELECT origen, destino, importe FROM traspasos_internos")
-
-# 2. Si no hay movimientos todavía, aseguramos que las tablas no den error en pantalla
-if df_reales_calc.empty:
-    df_reales_calc = pd.DataFrame([{"tipo": "Ingreso", "origen_destino": "Caja", "importe": 0.0, "pendiente": 0}])
 if df_traspasos_calc.empty:
-    df_traspasos_calc = pd.DataFrame([{"origen": "Caja", "destino": "Banco", "importe": 0.0}])
+    df_traspasos_calc = pd.DataFrame(columns=['origen', 'destino', 'importe'])
 
-# 3. Sumamos los ingresos y gastos de Caja y Banco (congelando los marcados como pendientes)
-ing_caja = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Caja') & (df_reales_calc['tipo'] == 'Ingreso') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
-gas_caja = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Caja') & (df_reales_calc['tipo'] == 'Gasto') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
+# Leemos también los registros que están marcados expresamente como pendientes
+cols_p, rows_p = ejecutar_turso_http("SELECT id FROM contabilidad WHERE COALESCE(pendiente, 0) = 1 AND COALESCE(eliminado, 0) = 0")
+lista_pendientes = [f[0] for f in rows_p] if rows_p else []
 
-ing_banco = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Banco') & (df_reales_calc['tipo'] == 'Ingreso') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
-gas_banco = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Banco') & (df_reales_calc['tipo'] == 'Gasto') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
+# Calculamos Ingresos y Gastos usando estrictamente tu tabla df_global original
+if df_global.empty:
+    ing_caja, gas_caja = 0.0, 0.0
+    ing_banco, gas_banco = 0.0, 0.0
+else:
+    # Filtramos la tabla excluyendo los asientos que estén pendientes de pago/cobro real
+    df_liquidados = df_global.loc[~df_global['id'].isin(lista_pendientes)]
+    
+    ing_caja = df_liquidados.loc[(df_liquidados['Cuenta'] == 'Caja') & (df_liquidados['Tipo'] == 'Ingreso'), 'Importe (€)'].sum()
+    gas_caja = df_liquidados.loc[(df_liquidados['Cuenta'] == 'Caja') & (df_liquidados['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
+    
+    ing_banco = df_liquidados.loc[(df_liquidados['Cuenta'] == 'Banco') & (df_liquidados['Tipo'] == 'Ingreso'), 'Importe (€)'].sum()
+    gas_banco = df_liquidados.loc[(df_liquidados['Cuenta'] == 'Banco') & (df_liquidados['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
 
-# 4. Sumamos y restamos los traspasos internos realizados entre bolsillos
+# Calculamos los traspasos internos realizados entre bolsillos
 tr_in_c = df_traspasos_calc.loc[df_traspasos_calc['destino'] == 'Caja', 'importe'].sum()
 tr_out_c = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Caja', 'importe'].sum()
 
 tr_in_b = df_traspasos_calc.loc[df_traspasos_calc['destino'] == 'Banco', 'importe'].sum()
 tr_out_b = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Banco', 'importe'].sum()
 
-# 5. Consolidación de los tres marcadores en pantalla
+# Consolidación final de los tres marcadores de la cabecera
 s_caja = caja_ini + ing_caja - gas_caja + tr_in_c - tr_out_c
 s_banco = banco_ini + ing_banco - gas_banco + tr_in_b - tr_out_b
 # --- FIN DEL REEMPLAZO DE LA CABECERA ---
-p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
-
 with p_reg:
     c_r1, c_r2 = st.columns(2)
     with c_r1:
