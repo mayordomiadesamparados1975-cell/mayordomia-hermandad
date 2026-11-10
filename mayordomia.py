@@ -494,11 +494,11 @@ tr_out_b = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Banco', 'import
 s_caja = caja_ini + ing_caja - gas_caja + tr_in_c - tr_out_c
 s_banco = banco_ini + ing_banco - gas_banco + tr_in_b - tr_out_b
 # --- FIN DEL REEMPLAZO DE LA CABECERA ---
-# --- RECUPERACIÓN DE LA CABECERA INSTITUCIONAL, ESCUDO Y SALDOS METRICOS ---
+# --- REPARACIÓN DE CABECERA, MODO MÓVIL AUTOMÁTICO Y SALDOS ---
 if "usr_activo" not in st.session_state: 
     st.session_state.usr_activo = "Mayordomo"
 
-# 1. Dibujamos el Escudo y el Título de la Hermandad en la parte superior
+# 1. Dibujamos el Escudo y el Título de la Hermandad
 img_b64 = ""
 if os.path.exists("escudo.png"):
     with open("escudo.png", "rb") as f_img: 
@@ -507,14 +507,61 @@ st.markdown(f"<div style='display: flex; align-items: center; justify-content: c
 
 st.markdown("---")
 
-# 2. Pintamos en grande las tres Tarjetas Métricas con los saldos calculados en tiempo real
+# 2. DETECTOR DE MÓVIL (Fuerza la vista simplificada de forma automática)
+_ua = st.context.headers.get("User-Agent", "").lower() if hasattr(st, "context") else ""
+_es_movil = any(k in _ua for k in ("android", "iphone", "ipad", "mobile"))
+modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=_es_movil)
+
+st.markdown("---")
+
+# 3. Si es móvil, se muestra la vista móvil simplificada y se detiene aquí la carga
+if modo_movil:
+    cm1, cm2 = st.columns(2)
+    cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
+    cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
+    st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
+    st.markdown("---")
+    st.markdown("#### ⚡ Apunte Rápido desde Móvil")
+    m_tipo = st.radio("Operación:", ["Gasto", "Ingreso"], horizontal=True, key="m_tipo")
+    m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
+    m_partida = st.selectbox("Concepto / Partida:", obtener_partidas(m_tipo), key="m_part")
+    m_pago = st.selectbox("Forma de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if m_cuenta == "Caja" else ["Transferencia Bancaria", "Domiciliación Bancaria", "Cargo / Comisión Bancaria"], key="m_pago")
+    m_concepto = st.text_input("Detalle (¿Qué o quién?):", placeholder="Ej: Compra de cera / Limosna", key="m_con")
+    m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
+    m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
+    
+    bloqueo_movil = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
+    if bloqueo_movil:
+        st.warning(bloqueo_movil)
+        st.button("🔒 GUARDADO DESACTIVADO POR CONCURRENCIA", disabled=True, use_container_width=True)
+    else:
+        if st.button("✅ GUARDAR APUNTE AHORA", use_container_width=True, key="m_btn_save"):
+            if not m_concepto.strip(): st.error("Escribe un detalle antes de guardar.")
+            else:
+                registrar_presencia_usuario(st.session_state.get("usr_activo", "Usuario"), "Vista Móvil")
+                n_arc = ""
+                if m_foto is not None:
+                    n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
+                    guardar_archivo_nube(n_arc, m_foto.getbuffer())
+                conn = conectar_bd(); cur = conn.cursor()
+                cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)", (datetime.now().strftime("%Y-%m-%d %H:%M"), m_tipo, m_cuenta, m_partida, m_concepto.strip(), m_pago, m_importe, n_arc))
+                conn.commit(); conn.sync()
+                st.success("¡Apunte registrado en la nube!"); st.rerun()
+    st.markdown("---")
+    st.markdown("##### 🕒 Últimos 5 movimientos")
+    if not df_global.empty:
+        for _, r_m in df_global.head(5).iterrows():
+            col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
+            st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
+    st.stop()
+
+# 4. Si es ordenador de escritorio, muestra las tarjetas normales y el identificador
 c1, c2, c3 = st.columns(3)
 c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
 c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
 c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
 st.markdown("---")
 
-# 3. Selector de control de concurrencia obligatoria
 quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
 st.markdown("---")
 # --- FIN DE LA CABECERA ---
