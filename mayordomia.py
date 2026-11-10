@@ -469,17 +469,19 @@ modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido
 quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
 st.markdown("---")
 
-def obtener_suma_sql(sql):
+ddef obtener_suma_sql(sql):
     try:
+        # Forzamos a la aplicación a sincronizarse con la base de datos antes de sumar
+        conectar_bd().sync()
         _, filas = ejecutar_turso_http(sql)
-        if filas and len(filas) > 0 and filas[0] is not None:
+        if filas and len(filas) > 0:
             if filas[0][0] is not None:
                 return float(filas[0][0])
     except:
         pass
     return 0.0
 
-# 1. Sumas de ingresos y gastos reales conciliados de la tabla contabilidad
+# 1. Sumas de ingresos y gastos reales de la tabla contabilidad (excluyendo eliminados y pendientes)
 ing_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
 gas_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
 
