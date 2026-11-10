@@ -413,6 +413,30 @@ def dibujar_tabla_movimientos(df_f):
             if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
                 borrar_registro(r_id)
                 st.rerun()
+def registrar_presencia_usuario(nombre_usuario, accion="registrar"):
+    conn = conectar_bd(); cur = conn.cursor()
+    ahora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_usuario', ?)", (f"{nombre_usuario} ({ahora_str})",))
+    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultima_accion', ?)", (accion,))
+
+def comprobar_bloqueo_concurrencia(nombre_actual):
+    conn = conectar_bd(); cur = conn.cursor()
+    cur.execute("SELECT valor FROM config_sistema WHERE clave = 'ultimo_usuario'")
+    res_u = cur.fetchone()
+    cur.execute("SELECT valor FROM config_sistema WHERE clave = 'ultima_accion'")
+    res_a = cur.fetchone()
+    if res_u and res_a:
+        user_info = itemgetter(0)(res_u)
+        accion_info = itemgetter(0)(res_a)
+        # Si el último cambio fue hace menos de 5 minutos y es de otra persona, avisamos
+        try:
+            fecha_partes = user_info.split("(")[1].replace(")", "").strip()
+            fecha_dt = datetime.strptime(fecha_partes, "%Y-%m-%d %H:%M:%S")
+            if (datetime.now() - fecha_dt).total_seconds() < 300 and nombre_actual not in user_info:
+                return f"⚠️ {user_info} está usando el módulo de {accion_info} ahora mismo. Espera a que termine para evitar duplicados."
+        except:
+            pass
+    return None
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
