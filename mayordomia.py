@@ -494,6 +494,11 @@ tr_out_b = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Banco', 'import
 s_caja = caja_ini + ing_caja - gas_caja + tr_in_c - tr_out_c
 s_banco = banco_ini + ing_banco - gas_banco + tr_in_b - tr_out_b
 # --- FIN DEL REEMPLAZO DE LA CABECERA ---
+if "usr_activo" not in st.session_state: 
+    st.session_state.usr_activo = "Mayordomo"
+quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
+st.markdown("---")
+
 # --- DECLARACIÓN OFICIAL DE LAS PESTAÑAS DEL PROGRAMA ---
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
