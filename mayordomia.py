@@ -471,10 +471,8 @@ st.markdown("---")
 
 def obtener_suma_sql(sql):
     try:
-        # Forzamos a la aplicación a sincronizarse con la base de datos antes de sumar
-        conectar_bd().sync()
         _, filas = ejecutar_turso_http(sql)
-        if filas and len(filas) > 0:
+        if filas and len(filas) > 0 and filas[0] is not None:
             if filas[0][0] is not None:
                 return float(filas[0][0])
     except:
