@@ -469,34 +469,38 @@ modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido
 quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
 st.markdown("---")
 
-def obtener_suma_sql(sql):
-    try:
-        _, filas = ejecutar_turso_http(sql)
-        if filas and len(filas) > 0 and filas[0] is not None:
-            if filas[0][0] is not None:
-                return float(filas[0][0])
-    except:
-        pass
-    return 0.0
+# --- REGENERACIÓN COMPLETA DEL MOTOR DE SALDOS REALES EN PANTALLA ---
+if "usr_activo" not in st.session_state: 
+    st.session_state.usr_activo = "Mayordomo"
 
-# 1. Sumas de ingresos y gastos reales de la tabla contabilidad (excluyendo eliminados y pendientes)
-ing_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
-gas_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+# 1. Cargamos las tablas de movimientos y traspasos reales desde la nube
+df_reales_calc = leer_tabla_turso("SELECT tipo, origen_destino, importe, COALESCE(pendiente, 0) as 'pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0")
+df_traspasos_calc = leer_tabla_turso("SELECT origen, destino, importe FROM traspasos_internos")
 
-ing_b_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Banco' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
-gas_b_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Banco' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+# 2. Si no hay movimientos todavía, aseguramos que las tablas no den error en pantalla
+if df_reales_calc.empty:
+    df_reales_calc = pd.DataFrame([{"tipo": "Ingreso", "origen_destino": "Caja", "importe": 0.0, "pendiente": 0}])
+if df_traspasos_calc.empty:
+    df_traspasos_calc = pd.DataFrame([{"origen": "Caja", "destino": "Banco", "importe": 0.0}])
 
-# 2. Sumas del módulo de traspasos internos entre Caja y Banco
-tr_en_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Caja'")
-tr_out_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE origen='Caja'")
+# 3. Sumamos los ingresos y gastos de Caja y Banco (congelando los marcados como pendientes)
+ing_caja = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Caja') & (df_reales_calc['tipo'] == 'Ingreso') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
+gas_caja = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Caja') & (df_reales_calc['tipo'] == 'Gasto') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
 
-tr_en_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Banco'")
-tr_out_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE origen='Banco'")
+ing_banco = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Banco') & (df_reales_calc['tipo'] == 'Ingreso') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
+gas_banco = df_reales_calc.loc[(df_reales_calc['origen_destino'] == 'Banco') & (df_reales_calc['tipo'] == 'Gasto') & (df_reales_calc['pendiente'] == 0), 'importe'].sum()
 
-# 3. Consolidación de los Totales en pantalla
-s_caja = caja_ini + ing_c_sql - gas_c_sql + tr_en_c - tr_out_c
-s_banco = banco_ini + ing_b_sql - gas_b_sql + tr_en_b - tr_out_b
+# 4. Sumamos y restamos los traspasos internos realizados entre bolsillos
+tr_in_c = df_traspasos_calc.loc[df_traspasos_calc['destino'] == 'Caja', 'importe'].sum()
+tr_out_c = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Caja', 'importe'].sum()
 
+tr_in_b = df_traspasos_calc.loc[df_traspasos_calc['destino'] == 'Banco', 'importe'].sum()
+tr_out_b = df_traspasos_calc.loc[df_traspasos_calc['origen'] == 'Banco', 'importe'].sum()
+
+# 5. Consolidación de los tres marcadores en pantalla
+s_caja = caja_ini + ing_caja - gas_caja + tr_in_c - tr_out_c
+s_banco = banco_ini + ing_banco - gas_banco + tr_in_b - tr_out_b
+# --- FIN DEL REEMPLAZO DE LA CABECERA ---
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
 with p_reg:
