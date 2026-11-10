@@ -75,13 +75,37 @@ def leer_tabla_turso(sql):
     cols, rows = ejecutar_turso_http(sql)
     return pd.DataFrame(rows, columns=cols)
 
+def registrar_presencia_usuario(nombre_usuario, accion="registrar"):
+    ahora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ejecutar_turso_http("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_usuario', ?)", (f"{nombre_usuario} ({ahora_str})",))
+    ejecutar_turso_http("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultima_accion', ?)", (accion,))
+
+def comprobar_bloqueo_concurrencia(nombre_actual):
+    try:
+        _, res_u = ejecutar_turso_http("SELECT valor FROM config_sistema WHERE clave = 'ultimo_usuario'")
+        _, res_a = ejecutar_turso_http("SELECT valor FROM config_sistema WHERE clave = 'ultima_accion'")
+        if res_u and res_a:
+            user_info = itemgetter(0)(res_u)[0]
+            accion_info = itemgetter(0)(res_a)[0]
+            if nombre_actual not in user_info:
+                fecha_partes = user_info.split("(")[1].replace(")", "").strip()
+                fecha_dt = datetime.strptime(fecha_partes, "%Y-%m-%d %H:%M:%S")
+                if (datetime.now() - fecha_dt).total_seconds() < 300:
+                    return f"⚠️ {user_info} está usando el módulo de {accion_info} ahora mismo. Espera a que termine para evitar duplicados."
+    except:
+        pass
+    return None
+
 def conectar_bd():
     conn = TursoConn()
     if "bd_inicializada" not in st.session_state:
         cursor = conn.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0, pendiente INTEGER DEFAULT 0)")
         try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN eliminado INTEGER DEFAULT 0")
         except: pass
+        try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN pendiente INTEGER DEFAULT 0")
+        except: pass
+        cursor.execute("CREATE TABLE IF NOT EXISTS traspasos_internos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, origen TEXT NOT NULL, destino TEXT NOT NULL, importe REAL NOT NULL, concepto TEXT NOT NULL)")
         cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
         cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
         cursor.execute("INSERT OR IGNORE INTO saldos_iniciales (id, caja_inicio, banco_inicio) VALUES (1, 0.0, 0.0)")
@@ -384,19 +408,23 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 def dibujar_tabla_movimientos(df_f):
     for idx, row in df_f.iterrows():
-        r_id = row.get('id')
-        r_tipo = row.get('Tipo')
-        r_cue = row.get('Cuenta')
-        r_par = row.get('Partida')
-        r_con = row.get('Concepto')
-        r_fec = row.get('Fecha')
-        r_pag = row.get('Forma Pago')
-        r_imp = float(row.get('Importe (€)'))
-        r_com = row.get('Comprobante')
+        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+        
+        # Consultamos en Turso de forma fluida el estado pendiente del asiento
+        es_pend = 0
+        try:
+            _, rows_p = ejecutar_turso_http(f"SELECT COALESCE(pendiente, 0) FROM contabilidad WHERE id = {r_id}")
+            if rows_p: es_pend = int(itemgetter(0)(rows_p)[0])
+        except: pass
+
         with st.container(border=True):
             ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
             ca.markdown(f"**#{r_id}**")
-            cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
+            
+            # Etiqueta visual burdeos/amarilla si el movimiento está congelado como pendiente
+            txt_p = " <span style='color:#d97706; font-weight:bold; font-size:11px; background:#fef3c7; padding:2px 6px; border-radius:3px;'>⏳ PENDIENTE</span>" if es_pend == 1 else ""
+            cb.markdown(f"**{r_par}** - {r_con}{txt_p}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
+            
             c_val = "green" if r_tipo == 'Ingreso' else "red"
             cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
             
@@ -405,11 +433,18 @@ def dibujar_tabla_movimientos(df_f):
                 st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
             if f"pdf_listo_{r_id}" in st.session_state:
                 cd.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
-            if r_com:
+            
+            if es_pend == 1:
+                # El botón dinámico permite asentar el movimiento en el saldo definitivo
+                if cd.button("🟢 Marcar como Pagado/Cobrado", key=f"liq_{r_id}", use_container_width=True):
+                    ejecutar_turso_http(f"UPDATE contabilidad SET pendiente = 0 WHERE id = {r_id}")
+                    st.rerun()
+            elif r_com:
                 if cd.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
                     st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
                 if st.session_state.get(f"img_lista_{r_id}"):
                     cd.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)
+            
             if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
                 borrar_registro(r_id)
                 st.rerun()
@@ -430,51 +465,30 @@ _ua = st.context.headers.get("User-Agent", "").lower() if hasattr(st, "context")
 _es_movil = any(k in _ua for k in ("android", "iphone", "ipad", "mobile"))
 modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=_es_movil)
 
+# Selector centralizado en la cabecera para bloquear accesos cruzados
+quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
 st.markdown("---")
 
-if df_global.empty:
-    s_caja, s_banco = caja_ini, banco_ini
-else:
-    s_caja = caja_ini + df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-    s_banco = banco_ini + df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
+def obtener_suma_sql(sql):
+    try:
+        _, filas = ejecutar_turso_http(sql)
+        if filas and filas[0][0] is not None: return float(filas[0][0])
+    except: pass
+    return 0.0
 
-if modo_movil:
-    cm1, cm2 = st.columns(2)
-    cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
-    cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
-    st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
-    st.markdown("---")
-    st.markdown("#### ⚡ Apunte Rápido desde Móvil")
-    m_tipo = st.radio("Operación:", ["Gasto", "Ingreso"], horizontal=True, key="m_tipo")
-    m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
-    m_partida = st.selectbox("Concepto / Partida:", obtener_partidas(m_tipo), key="m_part")
-    m_pago = st.selectbox("Forma de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if m_cuenta == "Caja" else ["Transferencia Bancaria", "Domiciliación Bancaria", "Cargo / Comisión Bancaria"], key="m_pago")
-    m_concepto = st.text_input("Detalle (¿Qué o quién?):", placeholder="Ej: Compra de cera / Limosna", key="m_con")
-    m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
-    m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
-    if st.button("✅ GUARDAR APUNTE AHORA", use_container_width=True, key="m_btn_save"):
-        if not m_concepto.strip(): st.error("Escribe un detalle antes de guardar.")
-        else:
-            n_arc = ""
-            if m_foto is not None:
-                n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
-                guardar_archivo_nube(n_arc, m_foto.getbuffer())
-            conn = conectar_bd(); cur = conn.cursor()
-            cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), m_tipo, m_cuenta, m_partida, m_concepto.strip(), m_pago, m_importe, n_arc))
-            conn.commit(); conn.sync()
-            st.success("¡Apunte registrado en la nube!"); st.rerun()
-    st.markdown("---")
-    st.markdown("##### 🕒 Últimos 5 movimientos")
-    if not df_global.empty:
-        for _, r_m in df_global.head(5).iterrows():
-            col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
-            st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
-    st.stop()
-c1, c2, c3 = st.columns(3)
-c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
-c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
-c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
-st.markdown("---")
+# Consultas por SQL directo a Turso (Evita errores de DataFrames vacíos)
+ing_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+gas_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+ing_b_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Banco' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+gas_b_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Banco' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+
+tr_in_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Caja'")
+tr_out_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE origen='Caja'")
+tr_in_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Banco'")
+tr_out_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE origen='Banco'")
+
+s_caja = caja_ini + ing_c_sql - gas_c_sql + tr_in_c - tr_out_c
+s_banco = banco_ini + ing_b_sql - gas_b_sql + tr_in_b - tr_out_b
 
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
@@ -488,18 +502,27 @@ with p_reg:
         forma_pago = st.selectbox("Forma o Canal de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if cuenta == "Caja" else ["Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
         concepto = st.text_input("Detalle específico o datos del Hermano/Beneficiario:", placeholder="Ej: Recibí de Manuel García para cuota anual")
         importe = st.number_input("Importe del apunte (€):", min_value=0.01, step=5.0, format="%.2f")
+        es_pendiente = st.checkbox("⏳ Marcar como OPERACIÓN PENDIENTE (No altera el saldo de caja/banco todavía)", value=False)
+    
     up_file = st.file_uploader("📷 Adjuntar foto del Ticket o Recibo (Opcional):", type=["png", "jpg", "jpeg", "pdf"])
-    if st.button("Asentar Asiento Contable", use_container_width=True):
-        if not concepto.strip(): st.error("Por favor, añada una descripción o detalle antes de guardar.")
-        else:
-            n_arc = ""
-            if up_file is not None:
-                n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
-                guardar_archivo_nube(n_arc, up_file.getbuffer())
-            conn = conectar_bd(); cursor = conn.cursor()
-            cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc))
-            conn.commit(); conn.sync()
-            st.success("Asiento grabado en la nube."); st.rerun()
+    
+    bloqueo_msg = comprobar_bloqueo_concurrencia(quien_opera)
+    if bloqueo_msg:
+        st.warning(bloqueo_msg)
+        st.button("🔒 GUARDADO DESACTIVADO TEMPORALMENTE", disabled=True, use_container_width=True)
+    else:
+        if st.button("Asentar Asiento Contable", use_container_width=True):
+            if not concepto.strip(): st.error("Por favor, añada una descripción o detalle antes de guardar.")
+            else:
+                registrar_presencia_usuario(quien_opera, "Registro Manual")
+                n_arc = ""
+                if up_file is not None:
+                    n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
+                    guardar_archivo_nube(n_arc, up_file.getbuffer())
+                conn = conectar_bd(); cursor = conn.cursor()
+                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc, 1 if es_pendiente else 0))
+                conn.commit(); conn.sync()
+                st.success("Asiento grabado en la nube."); st.rerun()
     st.markdown("---")
     with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
         st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
@@ -510,6 +533,27 @@ with p_reg:
         archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
         if archivo_excel is not None:
             procesar_panel_remesas(archivo_excel)
+            
+    st.markdown("---")
+    with st.expander("🔄 Registrar Traspaso Interno de Fondos (Mover dinero de Caja a Banco o viceversa)", expanded=False):
+        st.caption("Esta acción traspasa dinero real entre tus cuentas de tesorería, manteniendo los informes del Cabildo limpios de falsos ingresos o gastos.")
+        t_origen = st.radio("Cuenta de ORIGEN (De dónde sale el dinero):", ["Caja", "Banco"], horizontal=True, key="t_ori")
+        t_destino = "Banco" if t_origen == "Caja" else "Caja"
+        st.markdown(f"➡️ **Cuenta de DESTINO (A dónde entra el dinero):** `{t_destino}`")
+        t_importe = st.number_input("Cantidad a traspasar (€):", min_value=0.01, step=10.0, format="%.2f", key="t_imp")
+        t_concepto = st.text_input("Motivo o nota del traspaso:", value="Traspaso interno de fondos para necesidades de caja", key="t_con")
+        
+        bloqueo_traspaso = comprobar_bloqueo_concurrencia(quien_opera)
+        if bloqueo_traspaso:
+            st.warning(bloqueo_traspaso)
+            st.button("🔒 TRASPASO DESACTIVADO TEMPORALMENTE", disabled=True, use_container_width=True)
+        else:
+            if st.button("Confirmar y Registrar Traspaso Interno", use_container_width=True):
+                registrar_presencia_usuario(quien_opera, "Traspaso de Fondos")
+                conn = conectar_bd(); cur = conn.cursor()
+                cur.execute("INSERT INTO traspasos_internos (fecha, origen, destino, importe, concepto) VALUES (?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), t_origen, t_destino, t_importe, t_concepto.strip()))
+                conn.commit(); conn.sync()
+                st.success("¡Traspaso interno asentado en las cuentas!"); st.rerun()
 with p_fil:
     with st.container(border=True):
         cf1, cf2, cf3, cf4 = st.columns(4)
