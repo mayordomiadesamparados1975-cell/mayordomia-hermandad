@@ -131,13 +131,15 @@ def procesar_panel_remesas(archivo_excel):
             def armar_detalle(fila):
                 n = str(fila.get(col_nom, "")).strip()
                 c = float(fila.get("_imp_limpio", 0.0))
-                r_txt = f" [Ref: {str(fila.get(col_ref, '')).strip()}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
+                r_txt = f" [Ref: {str(fila.get(col_ref, ''))}" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
                 return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
             df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
             st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
             df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
             st.dataframe(df_preview, use_container_width=True, hide_index=True)
-                        bloqueo_remesa = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
+            
+            # Bloque de concurrencia alineado correctamente
+            bloqueo_remesa = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
             if bloqueo_remesa:
                 st.warning(bloqueo_remesa)
                 st.button("🔒 VOLCADO BLOQUEADO POR CONCURRENCIA", disabled=True, use_container_width=True)
