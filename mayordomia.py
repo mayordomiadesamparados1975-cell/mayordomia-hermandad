@@ -469,7 +469,7 @@ modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido
 quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
 st.markdown("---")
 
-ddef obtener_suma_sql(sql):
+def obtener_suma_sql(sql):
     try:
         # Forzamos a la aplicación a sincronizarse con la base de datos antes de sumar
         conectar_bd().sync()
