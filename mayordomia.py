@@ -471,29 +471,31 @@ st.markdown("---")
 
 def obtener_suma_sql(sql):
     try:
-        # Forzamos la actualización con el servidor en la nube antes de leer el total
-        conectar_bd().sync()
         _, filas = ejecutar_turso_http(sql)
-        if filas and filas is not None and len(filas) > 0:
+        if filas and len(filas) > 0 and filas[0] is not None:
             if filas[0][0] is not None:
                 return float(filas[0][0])
     except:
         pass
     return 0.0
 
-# Consultas por SQL directo a Turso (Evita errores de DataFrames vacíos)
+# 1. Sumas de ingresos y gastos reales conciliados de la tabla contabilidad
 ing_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
 gas_c_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Caja' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
+
 ing_b_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Banco' AND tipo='Ingreso' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
 gas_b_sql = obtener_suma_sql("SELECT SUM(importe) FROM contabilidad WHERE origen_destino='Banco' AND tipo='Gasto' AND COALESCE(eliminado,0)=0 AND COALESCE(pendiente,0)=0")
 
-tr_in_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Caja'")
+# 2. Sumas del módulo de traspasos internos entre Caja y Banco
+tr_en_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Caja'")
 tr_out_c = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE origen='Caja'")
-tr_in_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Banco'")
+
+tr_en_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE destino='Banco'")
 tr_out_b = obtener_suma_sql("SELECT SUM(importe) FROM traspasos_internos WHERE origen='Banco'")
 
-s_caja = caja_ini + ing_c_sql - gas_c_sql + tr_in_c - tr_out_c
-s_banco = banco_ini + ing_b_sql - gas_b_sql + tr_in_b - tr_out_b
+# 3. Consolidación de los Totales en pantalla
+s_caja = caja_ini + ing_c_sql - gas_c_sql + tr_en_c - tr_out_c
+s_banco = banco_ini + ing_b_sql - gas_b_sql + tr_en_b - tr_out_b
 
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
