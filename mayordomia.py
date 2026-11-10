@@ -430,7 +430,38 @@ def mostrar_panel_respaldos(df_global):
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
-caja_ini, banco_ini = s_ini if s_ini else (0.0, 0.0)
+if s_ini:
+    caja_ini, banco_ini = s_ini
+else:
+    caja_ini, banco_ini = 0.0, 0.0
+
+# --- AQUÍ VA EL PASO 2 ---
+df_reales = leer_tabla_turso("SELECT tipo, origen_destino, importe, pendiente FROM contabilidad WHERE eliminado = 0")
+df_traspasos = leer_tabla_turso("SELECT origen, destino, importe FROM traspasos_internos")
+
+if df_reales.empty:
+    df_reales = pd.DataFrame(columns=['tipo', 'origen_destino', 'importe', 'pendiente'])
+if df_traspasos.empty:
+    df_traspasos = pd.DataFrame(columns=['origen', 'destino', 'importe'])
+
+df_reales.columns = ['Tipo', 'Cuenta', 'Importe', 'Pendiente']
+
+ing_caja = df_reales.loc[(df_reales['Cuenta'] == 'Caja') & (df_reales['Tipo'] == 'Ingreso') & (df_reales['Pendiente'] == 0), 'Importe'].sum()
+gas_caja = df_reales.loc[(df_reales['Cuenta'] == 'Caja') & (df_reales['Tipo'] == 'Gasto') & (df_reales['Pendiente'] == 0), 'Importe'].sum()
+trasp_en_caja = df_traspasos.loc[df_traspasos['destino'] == 'Caja', 'importe'].sum()
+trasp_out_caja = df_traspasos.loc[df_traspasos['origen'] == 'Caja', 'importe'].sum()
+s_caja = caja_ini + ing_caja - gas_caja + trasp_en_caja - trasp_out_caja
+
+ing_banco = df_reales.loc[(df_reales['Cuenta'] == 'Banco') & (df_reales['Tipo'] == 'Ingreso') & (df_reales['Pendiente'] == 0), 'Importe'].sum()
+gas_banco = df_reales.loc[(df_reales['Cuenta'] == 'Banco') & (df_reales['Tipo'] == 'Gasto') & (df_reales['Pendiente'] == 0), 'Importe'].sum()
+trasp_en_banco = df_traspasos.loc[df_traspasos['destino'] == 'Banco', 'importe'].sum()
+trasp_out_banco = df_traspasos.loc[df_traspasos['origen'] == 'Banco', 'importe'].sum()
+s_banco = banco_ini + ing_banco - gas_banco + trasp_en_banco - trasp_out_banco
+# --- AQUÍ TERMINA EL PASO 2 ---
+
+img_b64 = ""
+if os.path.exists("escudo.png"):
+    with open("escudo.png", "rb") as _f_img: img_b64 = f'<img src="data:image/png;base64,{base64.b64encode(_f_img.read()).decode()}" style="height: 75px; margin-right: 15px;">'
 
 df_reales = leer_tabla_turso("SELECT tipo, origen_destino as 'Cuenta', importe as 'Importe', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado,0) = 0")
 df_traspasos = leer_tabla_turso("SELECT origen, destino, importe FROM traspasos_internos")
