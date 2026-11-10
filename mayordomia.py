@@ -137,18 +137,24 @@ def procesar_panel_remesas(archivo_excel):
             st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
             df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
             st.dataframe(df_preview, use_container_width=True, hide_index=True)
-            if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
-                if not df_val.empty:
-                    conn = conectar_bd(); cur = conn.cursor()
-                    for _, r_b in df_val.iterrows():
-                        imp_val = float(r_b.get("_imp_limpio", 0.0))
-                        con_str = str(r_b.get("_concepto_final", ""))
-                        fec_raw = r_b.get(col_fec)
-                        try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
-                        except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
-                    conn.commit(); conn.sync()
-                    st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
+                        bloqueo_remesa = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
+            if bloqueo_remesa:
+                st.warning(bloqueo_remesa)
+                st.button("🔒 VOLCADO BLOQUEADO POR CONCURRENCIA", disabled=True, use_container_width=True)
+            else:
+                if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
+                    if not df_val.empty:
+                        registrar_presencia_usuario(st.session_state.get("usr_activo", "Usuario"), "Importación Masiva")
+                        conn = conectar_bd(); cur = conn.cursor()
+                        for _, r_b in df_val.iterrows():
+                            imp_val = float(r_b.get("_imp_limpio", 0.0))
+                            con_str = str(r_b.get("_concepto_final", ""))
+                            fec_raw = r_b.get(col_fec)
+                            try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
+                            except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
+                        conn.commit(); conn.sync()
+                        st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
     except Exception as e:
         st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
 def obtener_partidas(tipo):
