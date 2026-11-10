@@ -69,17 +69,27 @@ class TursoConn:
     def sync(self): pass
 
 def leer_tabla_turso(sql):
-    cols, rows = ejecutar_turso_http(sql)
-    return pd.DataFrame(rows, columns=cols)
+    try:
+        cols, rows = ejecutar_turso_http(sql)
+        return pd.DataFrame(rows, columns=cols)
+    except Exception as e:
+        # Si la consulta falla porque falta una columna, devolvemos un DataFrame vacío provisional
+        return pd.DataFrame()
+
 def conectar_bd():
     conn = TursoConn()
     if "bd_inicializada" not in st.session_state:
         cursor = conn.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0, pendiente INTEGER DEFAULT 0)")
-        try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN eliminado INTEGER DEFAULT 0")
+        # 1. Crear tablas base si no existen
+        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT)")
+        
+        # 2. Forzar inserción manual de las nuevas columnas de seguridad y control
+        try: ejecutar_turso_http("ALTER TABLE contabilidad ADD COLUMN eliminado INTEGER DEFAULT 0")
         except: pass
-        try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN pendiente INTEGER DEFAULT 0")
+        try: ejecutar_turso_http("ALTER TABLE contabilidad ADD COLUMN pendiente INTEGER DEFAULT 0")
         except: pass
+        
+        # 3. Crear el resto de tablas del sistema institucional
         cursor.execute("CREATE TABLE IF NOT EXISTS traspasos_internos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, origen TEXT NOT NULL, destino TEXT NOT NULL, importe REAL NOT NULL, concepto TEXT NOT NULL)")
         cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
         cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
@@ -87,6 +97,7 @@ def conectar_bd():
         cursor.execute("CREATE TABLE IF NOT EXISTS presupuestos (partida TEXT PRIMARY KEY, tipo TEXT NOT NULL, importe_presupuestado REAL DEFAULT 0.0)")
         cursor.execute("CREATE TABLE IF NOT EXISTS archivos_nube (nombre TEXT PRIMARY KEY, datos_b64 TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS config_sistema (clave TEXT PRIMARY KEY, valor TEXT)")
+        
         cursor.execute("SELECT valor FROM config_sistema WHERE clave = 'init_partidas'")
         if not cursor.fetchone():
             iniciales = [("Ingreso", "Cuotas de Hermanos"), ("Ingreso", "Limosnas y Cepillos"), ("Ingreso", "Papeletas de Sitio"), ("Ingreso", "Venta de Recuerdos"), ("Ingreso", "Lotería"), ("Ingreso", "Donaciones"), ("Gasto", "Caridad y Bolsa Social"), ("Gasto", "Cultos, Cera y Flores"), ("Gasto", "Mantenimiento y Conservación"), ("Gasto", "Música y Acompañamiento"), ("Gasto", "Gastos de Administración")]
