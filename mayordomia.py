@@ -24,7 +24,6 @@ if not st.session_state.autenticado:
             if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
             else: st.error("Contraseña incorrecta.")
     st.stop()
-
 @st.cache_resource
 def obtener_sesion_http():
     s = requests.Session()
@@ -55,16 +54,14 @@ def ejecutar_turso_http(sql, params=()):
             else: fila.append(cell.get("value"))
         rows.append(tuple(fila))
     return cols, rows
+
 class TursoCursor:
-    def __init__(self):
-        self.rows = list()
+    def __init__(self): self.rows = list()
     def execute(self, sql, params=()):
         _, self.rows = ejecutar_turso_http(sql, params)
         return self
-    def fetchall(self):
-        return self.rows
-    def fetchone(self):
-        return itemgetter(0)(self.rows) if self.rows else None
+    def fetchall(self): return self.rows
+    def fetchone(self): return itemgetter(0)(self.rows) if self.rows else None
 
 class TursoConn:
     def cursor(self): return TursoCursor()
@@ -74,14 +71,16 @@ class TursoConn:
 def leer_tabla_turso(sql):
     cols, rows = ejecutar_turso_http(sql)
     return pd.DataFrame(rows, columns=cols)
-
 def conectar_bd():
     conn = TursoConn()
     if "bd_inicializada" not in st.session_state:
         cursor = conn.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0, pendiente INTEGER DEFAULT 0)")
         try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN eliminado INTEGER DEFAULT 0")
         except: pass
+        try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN pendiente INTEGER DEFAULT 0")
+        except: pass
+        cursor.execute("CREATE TABLE IF NOT EXISTS traspasos_internos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, origen TEXT NOT NULL, destino TEXT NOT NULL, importe REAL NOT NULL, concepto TEXT NOT NULL)")
         cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
         cursor.execute("CREATE TABLE IF NOT EXISTS saldos_iniciales (id INTEGER PRIMARY KEY, caja_inicio REAL DEFAULT 0.0, banco_inicio REAL DEFAULT 0.0)")
         cursor.execute("INSERT OR IGNORE INTO saldos_iniciales (id, caja_inicio, banco_inicio) VALUES (1, 0.0, 0.0)")
@@ -96,75 +95,12 @@ def conectar_bd():
             cursor.execute("INSERT INTO config_sistema (clave, valor) VALUES ('init_partidas', '1')")
         st.session_state.bd_inicializada = True
     return conn
-def procesar_panel_remesas(archivo_excel):
-    try:
-        try:
-            df_b = pd.read_excel(archivo_excel, engine="openpyxl").dropna(how="all")
-        except:
-            df_b = pd.read_excel(archivo_excel, engine="xlrd").dropna(how="all")
-        
-        cols_b = list(df_b.columns)
-        if len(cols_b) >= 2:
-            st.markdown("**1. Asigna las columnas de tu archivo Excel:**")
-            m1, m2, m3, m4, m5 = st.columns(5)
-            col_ref = m1.selectbox("Referencia Banco:", ["(Sin ref)"] + cols_b, index=1 if len(cols_b) > 0 else 0)
-            col_nom = m2.selectbox("Nombre Hermano:", cols_b, index=min(1, len(cols_b)-1))
-            col_imp = m3.selectbox("Cuota / Importe (€):", cols_b, index=min(3, len(cols_b)-1))
-            col_fec = m4.selectbox("Fecha Vencimiento:", cols_b, index=min(4, len(cols_b)-1))
-            col_est = m5.selectbox("Estado Recibo:", ["(Todos)"] + cols_b, index=min(len(cols_b), 5))
-            df_val = df_b.copy()
-            if col_est != "(Todos)":
-                estados_disp = list(df_val[col_est].dropna().unique())
-                estados_ok = st.multiselect("2. Selecciona los estados válidos a cobrar (ej. Pagado/Cobrado):", estados_disp, default=estados_disp)
-                df_val = df_val.loc[df_val[col_est].isin(estados_ok)]
-            def limpiar_num(val):
-                if isinstance(val, (int, float)): return float(val)
-                s = str(val).replace("€", "").replace(" ", "").strip()
-                if "," in s and "." in s: s = s.replace(".", "").replace(",", ".")
-                elif "," in s: s = s.replace(",", ".")
-                try: return float(s)
-                except: return 0.0
-            df_val["_imp_limpio"] = df_val[col_imp].apply(limpiar_num)
-            df_val = df_val.loc[df_val["_imp_limpio"] > 0]
-            part_remesa = st.selectbox("3. Partida contable donde asentar los recibos:", obtener_partidas("Ingreso"), key="part_remesa")
-            prefijo_con = st.text_input("Texto inicial del concepto:", value="Cuota domiciliada - ", key="pref_remesa")
-            def armar_detalle(fila):
-                n = str(fila.get(col_nom, "")).strip()
-                c = float(fila.get("_imp_limpio", 0.0))
-                r_txt = f" [Ref: {str(fila.get(col_ref, ''))}" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
-                return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
-            df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
-            st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
-            df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
-            st.dataframe(df_preview, use_container_width=True, hide_index=True)
-            
-            # Bloque de concurrencia alineado correctamente
-            bloqueo_remesa = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
-            if bloqueo_remesa:
-                st.warning(bloqueo_remesa)
-                st.button("🔒 VOLCADO BLOQUEADO POR CONCURRENCIA", disabled=True, use_container_width=True)
-            else:
-                if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
-                    if not df_val.empty:
-                        registrar_presencia_usuario(st.session_state.get("usr_activo", "Usuario"), "Importación Masiva")
-                        conn = conectar_bd(); cur = conn.cursor()
-                        for _, r_b in df_val.iterrows():
-                            imp_val = float(r_b.get("_imp_limpio", 0.0))
-                            con_str = str(r_b.get("_concepto_final", ""))
-                            fec_raw = r_b.get(col_fec)
-                            try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
-                            except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-                            cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
-                        conn.commit(); conn.sync()
-                        st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
-    except Exception as e:
-        st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
+
 def obtener_partidas(tipo):
     conn = conectar_bd(); cursor = conn.cursor()
     cursor.execute("SELECT nombre FROM partidas_personalizadas WHERE tipo = ? ORDER BY nombre ASC", (tipo,))
     lista = [itemgetter(0)(f) for f in cursor.fetchall()]
     return lista if lista else ["General"]
-
 def guardar_archivo_nube(nombre, bytes_data):
     conn = conectar_bd(); cur = conn.cursor()
     b64_str = base64.b64encode(bytes_data).decode('utf-8')
@@ -175,6 +111,30 @@ def leer_archivo_nube(nombre):
     cur.execute("SELECT datos_b64 FROM archivos_nube WHERE nombre = ?", (nombre,))
     res = cur.fetchone()
     return base64.b64decode(itemgetter(0)(res)) if res else None
+
+def registrar_presencia_usuario(nombre_usuario, accion="registrar"):
+    conn = conectar_bd(); cur = conn.cursor()
+    ahora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_usuario', ?)", (f"{nombre_usuario} ({ahora_str})",))
+    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultima_accion', ?)", (accion,))
+
+def comprobar_bloqueo_concurrencia(nombre_actual):
+    conn = conectar_bd(); cur = conn.cursor()
+    cursor = conn.cursor()
+    cursor.execute("SELECT valor FROM config_sistema WHERE clave = 'ultimo_usuario'")
+    res_u = cursor.fetchone()
+    cursor.execute("SELECT valor FROM config_sistema WHERE clave = 'ultima_accion'")
+    res_a = cursor.fetchone()
+    if res_u and res_a:
+        user_info = itemgetter(0)(res_u)
+        accion_info = itemgetter(0)(res_a)
+        try:
+            fecha_partes = user_info.split("(")[1].replace(")", "").strip()
+            fecha_dt = datetime.strptime(fecha_partes, "%Y-%m-%d %H:%M:%S")
+            if (datetime.now() - fecha_dt).total_seconds() < 300 and nombre_actual not in user_info:
+                return f"⚠️ {user_info} está usando el módulo de {accion_info} ahora mismo. Espera a que termine para evitar duplicados."
+        except: pass
+    return None
 
 def borrar_registro(id_reg):
     conn = conectar_bd(); cursor = conn.cursor()
@@ -189,33 +149,36 @@ def borrar_definitivo(id_reg):
     if arc and itemgetter(0)(arc):
         cursor.execute("DELETE FROM archivos_nube WHERE nombre = ?", (itemgetter(0)(arc),))
     cursor.execute("DELETE FROM contabilidad WHERE id = ?", (id_reg,))
-
 def generar_excel(df):
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-        df.drop(columns=['Comprobante'], errors='ignore').to_excel(writer, index=False, sheet_name='Movimientos')
+        df.drop(columns=['Comprobante', 'Comprobante_Nombre', 'eliminado', 'pendiente'], errors='ignore').to_excel(writer, index=False, sheet_name='Movimientos')
     buf.seek(0); return buf
+
 def generar_backup_zip():
     buf = io.BytesIO()
-    tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema"]
+    tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "traspasos_internos"]
     respaldo = {}
     for t in tablas:
-        cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
-        respaldo[t] = {"cols": cols, "rows": rows}
+        try:
+            cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
+            respaldo[t] = {"cols": cols, "rows": rows}
+        except: pass
     _, archivos = ejecutar_turso_http("SELECT nombre, datos_b64 FROM archivos_nube")
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("datos_hermandad.json", json.dumps(respaldo, ensure_ascii=False, indent=2))
         for nom, b64 in archivos:
             if nom and b64:
-                zf.writestr(f"tickets/{nom}", base64.b64decode(b64))
-    buf.seek(0)
-    return buf
+                try: zf.writestr(f"tickets/{nom}", base64.b64decode(b64))
+                except: pass
+    buf.seek(0); return buf
 
 def restaurar_backup_zip(archivo_zip):
     with zipfile.ZipFile(archivo_zip, "r") as zf:
         respaldo = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
-        for t in ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "archivos_nube"]:
-            ejecutar_turso_http(f"DELETE FROM {t}")
+        for t in ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "archivos_nube", "traspasos_internos"]:
+            try: ejecutar_turso_http(f"DELETE FROM {t}")
+            except: pass
         for t, contenido in respaldo.items():
             cols = contenido["cols"]
             placeholders = ", ".join(["?"] * len(cols))
@@ -227,36 +190,6 @@ def restaurar_backup_zip(archivo_zip):
                 nom_real = item.replace("tickets/", "", 1)
                 b64_str = base64.b64encode(zf.read(item)).decode("utf-8")
                 ejecutar_turso_http("INSERT OR REPLACE INTO archivos_nube (nombre, datos_b64) VALUES (?, ?)", (nom_real, b64_str))
-def mostrar_panel_respaldos(df_global):
-    st.markdown("---")
-    st.markdown("**🛡️ Copias de Seguridad y Restauración**")
-    st.download_button(label="📦 DESCARGAR BACKUP INTEGRAL (.ZIP CON TICKETS)", data=generar_backup_zip(), file_name=f"Backup_Integral_Desamparados_{datetime.now().strftime('%Y%m%d_%H%M')}.zip", mime="application/zip", use_container_width=True)
-    st.download_button(label="📊 Exportar Solo Movimientos (.XLSX)", data=generar_excel(df_global), file_name=f"Movimientos_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-    with st.expander("⏪ Restaurar Base de Datos desde Backup (.ZIP)", expanded=False):
-        st.warning("⚠️ Atención: Al restaurar un archivo .ZIP se reemplazarán todos los datos actuales por los de la copia.")
-        zip_subido = st.file_uploader("Selecciona el archivo Backup_Integral (.zip):", type=["zip"], key="up_zip_restore")
-        if zip_subido is not None:
-            if st.button("🔄 CONFIRMAR Y RESTAURAR AHORA", use_container_width=True):
-                try:
-                    restaurar_backup_zip(zip_subido)
-                    st.success("¡Base de datos y tickets restaurados correctamente!"); st.rerun()
-                except Exception as e:
-                    st.error(f"Error al restaurar el backup: {e}")
-    st.markdown("---")
-    df_pap = leer_tabla_turso("SELECT id, fecha, tipo, origen_destino, partida, concepto, importe FROM contabilidad WHERE eliminado = 1 ORDER BY id DESC")
-    with st.expander(f"🗑️ Papelera de Reciclaje ({len(df_pap)} apuntes borrados)", expanded=False):
-        if df_pap.empty:
-            st.caption("La papelera está vacía.")
-        else:
-            for _, rp in df_pap.iterrows():
-                pid_b = rp.get("id")
-                with st.container(border=True):
-                    st.markdown(f"**#{pid_b}** | {rp.get('partida')} — {rp.get('concepto')} (**{float(rp.get('importe')):,.2f} €**)<br/><small style='color:gray;'>{rp.get('fecha')} | {rp.get('origen_destino')}</small>", unsafe_allow_html=True)
-                    b_res, b_del = st.columns(2)
-                    if b_res.button("♻️ Restaurar", key=f"rest_{pid_b}", use_container_width=True):
-                        restaurar_registro(pid_b); st.rerun()
-                    if b_del.button("🔥 Borrar Definitivo", key=f"pdel_{pid_b}", use_container_width=True):
-                        borrar_definitivo(pid_b); st.rerun()
 def marca_agua_vertical(canvas, doc):
     if os.path.exists("escudo.png"):
         canvas.saveState(); canvas.setFillAlpha(0.08); canvas.setStrokeAlpha(0.08)
@@ -276,26 +209,12 @@ def generar_pdf_recibo(row):
             except: pass
         story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
         story.append(Paragraph(f"<b>{ej}</b>", ParagraphStyle('SubE', alignment=1, fontSize=10, textColor=burdeos)))
-        
-        # Cambiamos el título según sea un ingreso o un pago a proveedor
-        if row.get('Tipo') == 'Ingreso':
-            sub = "JUSTIFICANTE OFICIAL DE RECAUDACIÓN"
-        else:
-            sub = "ORDEN DE PAGO A PROVEEDOR / ACREEDOR"
-            
+        if row.get('Tipo') == 'Ingreso': sub = "JUSTIFICANTE OFICIAL DE RECAUDACIÓN"
+        else: sub = "ORDEN DE PAGO A PROVEEDOR / ACREEDOR"
         story.append(Paragraph(sub, ParagraphStyle('S', alignment=1, fontSize=11, textColor=colors.gray))); story.append(Spacer(1, 15))
-        
-        # Forzamos a que el importe siempre sea positivo en el papel (usando abs())
         importe_positivo = abs(float(row.get('Importe (€)', 0.0)))
-        
-        t_data = [
-            [Paragraph(f"<b>Nº Asiento:</b> #{row.get('id')}", n_st), Paragraph(f"<b>Fecha:</b> {row.get('Fecha')}", n_st)], 
-            [Paragraph(f"<b>Tipo Operación:</b> {row.get('Tipo')}", n_st), Paragraph(f"<b>Cuenta Asignada:</b> {row.get('Cuenta')}", n_st)], 
-            [Paragraph(f"<b>Partida Contable:</b> {row.get('Partida')}", n_st), Paragraph(f"<b>Forma Pago:</b> {row.get('Forma Pago')}", n_st)], 
-            [Paragraph(f"<b>Detalle / Interesado:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{importe_positivo:,.2f} €</b></font>", n_st)]
-        ]
-        
-        t = RLTable(t_data, colWidths=(250, 250)); t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(t); story.append(Spacer(1, 35))
+        t_data = [[Paragraph(f"<b>Nº Asiento:</b> #{row.get('id')}", n_st), Paragraph(f"<b>Fecha:</b> {row.get('Fecha')}", n_st)], [Paragraph(f"<b>Tipo Operación:</b> {row.get('Tipo')}", n_st), Paragraph(f"<b>Cuenta Asignada:</b> {row.get('Cuenta')}", n_st)], [Paragraph(f"<b>Partida Contable:</b> {row.get('Partida')}", n_st), Paragraph(f"<b>Forma Pago:</b> {row.get('Forma Pago')}", n_st)], [Paragraph(f"<b>Detalle / Interesado:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{importe_positivo:,.2f} €</b></font>", n_st)]]
+        t = RLTable(t_data, colWidths=(250, 250)); t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 8), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(t); story.append(Spacer(1, 35))
         if row.get('Tipo') == 'Ingreso': story.append(Paragraph("<b>___________________________</b><br/>Firma y Sello del Mayordomo", ParagraphStyle('F', alignment=1, fontSize=10)))
         else:
             tf = RLTable([[Paragraph("<b>___________________________</b><br/>Páguese, El Mayordomo", ParagraphStyle('F1', alignment=1, fontSize=10)), Paragraph("<b>___________________________</b><br/>Recibí, El Beneficiario / Perceptor", ParagraphStyle('F2', alignment=1, fontSize=10))]], colWidths=(250, 250)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
@@ -319,6 +238,7 @@ def generar_pdf_resumen(df, titulo_reporte):
     t_datos.append([Paragraph("<b>TOTAL GASTOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>-{t_gas:,.2f} €</b>", n_st)])
     t_datos.append([Paragraph("<b>RESULTADO NETO DEL EXTRACTO</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{(t_ing - t_gas):,.2f} €</b>", n_st)])
     t = RLTable(t_datos, colWidths=(75, 45, 45, 120, 250, 115, 70)); t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('BOTTOMPADDING', (0,0), (-1,-1), 4), ('TOPPADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LINEABOVE', (0,-3), (-1,-3), 1.2, burdeos)])); story.append(t); doc.build(story, onFirstPage=marca_agua_horizontal, onLaterPages=marca_agua_horizontal); buf.seek(0); return buf
+
 def generar_pdf_cierre(df, anio, c_ini, b_ini, c_fin, b_fin):
     buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
     t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=16, leading=20, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=10, leading=13, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=11); b_st = ParagraphStyle('B', parent=styles['Normal'], fontSize=9, leading=12)
@@ -389,249 +309,123 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     t_res = [[Paragraph("<b><font color='white'>CONCEPTO</font></b>", n_st), Paragraph("<b><font color='white'>PRESUPUESTADO</font></b>", n_st), Paragraph("<b><font color='white'>EJECUTADO</font></b>", n_st), Paragraph("<b><font color='white'>DESVIACIÓN</font></b>", n_st)], [Paragraph("<b>SUPERÁVIT / DÉFICIT DEL EJERCICIO</b>", n_st), Paragraph(f"<b>{res_p:,.2f} €</b>", n_st), Paragraph(f"<b>{res_e:,.2f} €</b>", n_st), Paragraph(f"<b>{res_d:,.2f} €</b>", n_st)]]
     tr = RLTable(t_res, colWidths=(230, 100, 100, 100)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 5), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tr); story.append(Spacer(1, 25))
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
-    doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+    doc.build(story, onFirstPage=marca_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+def procesar_panel_remesas(archivo_excel):
+    try:
+        try: df_b = pd.read_excel(archivo_excel, engine="openpyxl").dropna(how="all")
+        except: df_b = pd.read_excel(archivo_excel, engine="xlrd").dropna(how="all")
+        cols_b = list(df_b.columns)
+        if len(cols_b) >= 2:
+            st.markdown("**1. Asigna las columnas de tu archivo Excel:**")
+            m1, m2, m3, m4, m5 = st.columns(5)
+            col_ref = m1.selectbox("Referencia Banco:", ["(Sin ref)"] + cols_b, index=1 if len(cols_b) > 0 else 0)
+            col_nom = m2.selectbox("Nombre Hermano:", cols_b, index=min(1, len(cols_b)-1))
+            col_imp = m3.selectbox("Cuota / Importe (€):", cols_b, index=min(3, len(cols_b)-1))
+            col_fec = m4.selectbox("Fecha Vencimiento:", cols_b, index=min(4, len(cols_b)-1))
+            col_est = m5.selectbox("Estado Recibo:", ["(Todos)"] + cols_b, index=min(len(cols_b), 5))
+            df_val = df_b.copy()
+            if col_est != "(Todos)":
+                estados_disp = list(df_val[col_est].dropna().unique())
+                estados_ok = st.multiselect("2. Selecciona los estados válidos a cobrar (ej. Pagado/Cobrado):", estados_disp, default=estados_disp)
+                df_val = df_val.loc[df_val[col_est].isin(estados_ok)]
+            def limpiar_num(val):
+                if isinstance(val, (int, float)): return float(val)
+                s = str(val).replace("€", "").replace(" ", "").strip()
+                if "," in s and "." in s: s = s.replace(".", "").replace(",", ".")
+                elif "," in s: s = s.replace(",", ".")
+                try: return float(s)
+                except: return 0.0
+            df_val["_imp_limpio"] = df_val[col_imp].apply(limpiar_num)
+            df_val = df_val.loc[df_val["_imp_limpio"] > 0]
+            part_remesa = st.selectbox("3. Partida contable donde asentar los recibos:", obtener_partidas("Ingreso"), key="part_remesa")
+            prefijo_con = st.text_input("Texto inicial del concepto:", value="Cuota domiciliada - ", key="pref_remesa")
+            def armar_detalle(fila):
+                n = str(fila.get(col_nom, "")).strip()
+                c = float(fila.get("_imp_limpio", 0.0))
+                r_txt = f" [Ref: {str(fila.get(col_ref, ''))}]" if col_ref != "(Sin ref)" and pd.notna(fila.get(col_ref)) else ""
+                return f"{prefijo_con}{n} | Cuota abonada: {c:,.2f} €{r_txt}"
+            df_val["_concepto_final"] = df_val.apply(armar_detalle, axis=1)
+            st.info(f"Se han detectado **{len(df_val)} hermanos con recibo válido** por un importe total de **{df_val['_imp_limpio'].sum():,.2f} €**.")
+            df_preview = pd.DataFrame({"Hermano": df_val[col_nom], "Cuota (€)": df_val["_imp_limpio"], "Vencimiento": df_val[col_fec], "Concepto que se guardará": df_val["_concepto_final"]})
+            st.dataframe(df_preview, use_container_width=True, hide_index=True)
+            bloqueo_remesa = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
+            if bloqueo_remesa:
+                st.warning(bloqueo_remesa); st.button("🔒 VOLCADO BLOQUEADO POR CONCURRENCIA", disabled=True, use_container_width=True)
+            else:
+                if st.button(f"📥 VOLCAR {len(df_val)} RECIBOS EN BANCO", use_container_width=True):
+                    if not df_val.empty:
+                        registrar_presencia_usuario(st.session_state.get("usr_activo", "Usuario"), "Importación Masiva")
+                        conn = conectar_bd(); cur = conn.cursor()
+                        for _, r_b in df_val.iterrows():
+                            imp_val = float(r_b.get("_imp_limpio", 0.0))
+                            con_str = str(r_b.get("_concepto_final", ""))
+                            fec_raw = r_b.get(col_fec)
+                            try: fec_str = pd.to_datetime(fec_raw).strftime("%Y-%m-%d 09:00")
+                            except: fec_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)", (fec_str, "Ingreso", "Banco", part_remesa, con_str, "Domiciliación Bancaria", imp_val, ""))
+                        conn.commit(); conn.sync(); st.success(f"¡{len(df_val)} recibos importados!"); st.rerun()
+    except Exception as e: st.error(f"Error al leer Excel: {e}")
 def dibujar_tabla_movimientos(df_f):
     for idx, row in df_f.iterrows():
-        r_id = row.get('id')
-        r_tipo = row.get('Tipo')
-        r_cue = row.get('Cuenta')
-        r_par = row.get('Partida')
-        r_con = row.get('Concepto')
-        r_fec = row.get('Fecha')
-        r_pag = row.get('Forma Pago')
-        r_imp = float(row.get('Importe (€)'))
-        r_com = row.get('Comprobante')
+        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+        cols_p, rows_p = ejecutar_turso_http(f"SELECT COALESCE(pendiente, 0) FROM contabilidad WHERE id = {r_id}")
+        es_pend = rows_p[0][0] if rows_p else 0
         with st.container(border=True):
             ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
             ca.markdown(f"**#{r_id}**")
-            cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
+            txt_pendiente = " <span style='color:#d97706; font-weight:bold; font-size:11px; background:#fef3c7; padding:2px 6px; border-radius:3px;'>⏳ PENDIENTE CONCILIAR</span>" if es_pend == 1 else ""
+            cb.markdown(f"**{r_par}** - {r_con}{txt_pendiente}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
             c_val = "green" if r_tipo == 'Ingreso' else "red"
             cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
-            
             txt_b = "📥 Preparar Justificante" if r_tipo == 'Ingreso' else "📄 Preparar Recibí"
             if cd.button(txt_b, key=f"prep_pdf_{r_id}", use_container_width=True):
                 st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
             if f"pdf_listo_{r_id}" in st.session_state:
                 cd.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
-            if r_com:
+            if es_pend == 1:
+                if cd.button("🟢 Marcar como Liquidado", key=f"liq_{r_id}", use_container_width=True):
+                    ejecutar_turso_http(f"UPDATE contabilidad SET pendiente = 0 WHERE id = {r_id}"); st.rerun()
+            elif r_com:
                 if cd.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
                     st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
                 if st.session_state.get(f"img_lista_{r_id}"):
                     cd.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)
             if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
-                borrar_registro(r_id)
-                st.rerun()
-def registrar_presencia_usuario(nombre_usuario, accion="registrar"):
-    conn = conectar_bd(); cur = conn.cursor()
-    ahora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_usuario', ?)", (f"{nombre_usuario} ({ahora_str})",))
-    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultima_accion', ?)", (accion,))
+                borrar_registro(r_id); st.rerun()
+def generar_pdf_manual():
+    buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=35, bottomMargin=35); story = []; styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
+    t_st = ParagraphStyle('TM', parent=styles['Heading1'], fontSize=14, leading=18, alignment=1, textColor=burdeos); h_st = ParagraphStyle('HM', parent=styles['Heading2'], fontSize=11, leading=14, textColor=burdeos, spaceBefore=10); n_st = ParagraphStyle('NM', parent=styles['Normal'], fontSize=9, leading=12)
+    story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st)); story.append(Paragraph("GUÍA OFICIAL DE MANTENIMIENTO, ACCESO Y SEGURIDAD", ParagraphStyle('SM', alignment=1, fontSize=10, textColor=colors.gray))); story.append(Spacer(1, 12))
+    story.append(Paragraph("<b>1. Direcciones Oficiales del Sistema</b>", h_st)); story.append(Paragraph("• <b>Aplicación Web:</b> https://streamlit.app<br/>• <b>Código Fuente (GitHub):</b> https://github.com", n_st))
+    story.append(Paragraph("<b>2. Instalación y Seguridad Multi-Usuario</b>", h_st)); story.append(Paragraph("• <b>Móviles:</b> Abrir URL -> Añadir a pantalla de inicio para crear el icono.<br/>• <b>Semáforo Concurrencia:</b> Bloquea los botones de escritura automáticamente si otro oficial está guardando movimientos para evitar descuadres.", n_st))
+    story.append(Paragraph("<b>3. Ficha Oficial de Credenciales (Custodiar bajo llave)</b>", h_st)); story.append(Spacer(1, 6))
+    t_cred = [[Paragraph("<b><font color='white'>Plataforma</font></b>", n_st), Paragraph("<b><font color='white'>Usuario / Correo</font></b>", n_st), Paragraph("<b><font color='white'>Contraseña / Notas</font></b>", n_st)], [Paragraph("App Mayordomía", n_st), Paragraph("Acceso General Junta", n_st), Paragraph("", n_st)], [Paragraph("Correo Gmail Oficial", n_st), Paragraph("", n_st), Paragraph("", n_st)], [Paragraph("GitHub / Turso", n_st), Paragraph("", n_st), Paragraph("", n_st)]]
+    tabla = RLTable(t_cred, colWidths=(150, 190, 190)); tabla.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('PADDING', (0,0), (-1,-1), 5)])); story.append(tabla)
+    doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 
-def comprobar_bloqueo_concurrencia(nombre_actual):
-    conn = conectar_bd(); cur = conn.cursor()
-    cur.execute("SELECT valor FROM config_sistema WHERE clave = 'ultimo_usuario'")
-    res_u = cur.fetchone()
-    cur.execute("SELECT valor FROM config_sistema WHERE clave = 'ultima_accion'")
-    res_a = cur.fetchone()
-    if res_u and res_a:
-        user_info = itemgetter(0)(res_u)
-        accion_info = itemgetter(0)(res_a)
-        # Si el último cambio fue hace menos de 5 minutos y es de otra persona, avisamos
-        try:
-            fecha_partes = user_info.split("(")[1].replace(")", "").strip()
-            fecha_dt = datetime.strptime(fecha_partes, "%Y-%m-%d %H:%M:%S")
-            if (datetime.now() - fecha_dt).total_seconds() < 300 and nombre_actual not in user_info:
-                return f"⚠️ {user_info} está usando el módulo de {accion_info} ahora mismo. Espera a que termine para evitar duplicados."
-        except:
-            pass
-    return None
+def mostrar_panel_respaldos(df_global):
+    st.markdown("---"); st.markdown("**🛡— Gestión de Copias de Seguridad y Manuales**")
+    st.download_button(label="📦 DESCARGAR BACKUP INTEGRAL (.ZIP CON TICKETS)", data=generar_backup_zip(), file_name=f"Backup_Integral_Desamparados_{datetime.now().strftime('%Y%m%d_%H%M')}.zip", mime="application/zip", use_container_width=True)
+    st.download_button(label="📊 Exportar Solo Movimientos (.XLSX)", data=generar_excel(df_global), file_name=f"Movimientos_Mayordomia_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+    st.download_button(label="📘 DESCARGAR MANUAL DE MANTENIMIENTO Y FICHA CLAVES (PDF)", data=generar_pdf_manual(), file_name="Manual_Mayordomia_Desamparados.pdf", mime="application/pdf", use_container_width=True)
+    with st.expander("⏪ Restaurar Base de Datos desde Backup (.ZIP)", expanded=False):
+        st.warning("⚠️ Reemplazará por completo todos los datos y fotos actuales por los de la copia.")
+        zip_subido = st.file_uploader("Selecciona el archivo .zip de restauración:", type=["zip"])
+        if zip_subido is not None:
+            if st.button("🔄 CONFIRMAR Y RESTAURAR AHORA", use_container_width=True):
+                try: restaurar_backup_zip(zip_subido); st.success("¡Base de datos y tickets restaurados!"); st.rerun()
+                except Exception as e: st.error(f"Error al restaurar: {e}")
+
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
-if s_ini:
-    caja_ini, banco_ini = s_ini
-else:
-    caja_ini, banco_ini = 0.0, 0.0
+caja_ini, banco_ini = s_ini if s_ini else (0.0, 0.0)
 
-img_b64 = ""
-if os.path.exists("escudo.png"):
-    with open("escudo.png", "rb") as f_img: img_b64 = f'<img src="data:image/png;base64,{base64.b64encode(f_img.read()).decode()}" style="height: 75px; margin-right: 15px;">'
-st.markdown(f"<div style='display: flex; align-items: center; justify-content: center; padding: 5px 0;'>{img_b64}<div><h1 style='margin: 0; font-size: 24px; color: #800020;'>Hermandad de Nuestra Señora de los Desamparados</h1><p style='margin: 0; color: #6B7280; font-size: 12px; font-weight: bold; letter-spacing: 1.5px;'>MAYORDOMÍA INSTITUCIONAL (NUBE)</p></div></div>", unsafe_allow_html=True)
+df_reales = leer_tabla_turso("SELECT tipo, origen_destino as 'Cuenta', importe as 'Importe', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado,0) = 0")
+df_traspasos = leer_tabla_turso("SELECT origen, destino, importe FROM traspasos_internos")
 
-_ua = st.context.headers.get("User-Agent", "").lower() if hasattr(st, "context") else ""
-_es_movil = any(k in _ua for k in ("android", "iphone", "ipad", "mobile"))
-modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido)", value=_es_movil)
-
-st.markdown("---")
-
-if df_global.empty:
-    s_caja, s_banco = caja_ini, banco_ini
-else:
-    s_caja = caja_ini + df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-    s_banco = banco_ini + df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-
-if modo_movil:
-    cm1, cm2 = st.columns(2)
-    cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
-    cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
-    st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
-    st.markdown("---")
-    st.markdown("#### ⚡ Apunte Rápido desde Móvil")
-    m_tipo = st.radio("Operación:", ["Gasto", "Ingreso"], horizontal=True, key="m_tipo")
-    m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
-    m_partida = st.selectbox("Concepto / Partida:", obtener_partidas(m_tipo), key="m_part")
-    m_pago = st.selectbox("Forma de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if m_cuenta == "Caja" else ["Transferencia Bancaria", "Domiciliación Bancaria", "Cargo / Comisión Bancaria"], key="m_pago")
-    m_concepto = st.text_input("Detalle (¿Qué o quién?):", placeholder="Ej: Compra de cera / Limosna", key="m_con")
-    m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
-    m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
-    if st.button("✅ GUARDAR APUNTE AHORA", use_container_width=True, key="m_btn_save"):
-        if not m_concepto.strip(): st.error("Escribe un detalle antes de guardar.")
-        else:
-            n_arc = ""
-            if m_foto is not None:
-                n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
-                guardar_archivo_nube(n_arc, m_foto.getbuffer())
-            conn = conectar_bd(); cur = conn.cursor()
-            cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), m_tipo, m_cuenta, m_partida, m_concepto.strip(), m_pago, m_importe, n_arc))
-            conn.commit(); conn.sync()
-            st.success("¡Apunte registrado en la nube!"); st.rerun()
-    st.markdown("---")
-    st.markdown("##### 🕒 Últimos 5 movimientos")
-    if not df_global.empty:
-        for _, r_m in df_global.head(5).iterrows():
-            col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
-            st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
-    st.stop()
-c1, c2, c3 = st.columns(3)
-c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
-c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
-c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
-st.markdown("---")
-
-p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
-
-with p_reg:
-    c_r1, c_r2 = st.columns(2)
-    with c_r1:
-        tipo = st.radio("Tipo de Apunte:", ["Ingreso", "Gasto"], horizontal=True)
-        cuenta = st.radio("Destino / Origen del dinero:", ["Caja", "Banco"], horizontal=True)
-        partida = st.selectbox("Concepto General o Partida:", obtener_partidas(tipo))
-    with c_r2:
-        forma_pago = st.selectbox("Forma o Canal de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if cuenta == "Caja" else ["Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
-        concepto = st.text_input("Detalle específico o datos del Hermano/Beneficiario:", placeholder="Ej: Recibí de Manuel García para cuota anual")
-        importe = st.number_input("Importe del apunte (€):", min_value=0.01, step=5.0, format="%.2f")
-    up_file = st.file_uploader("📷 Adjuntar foto del Ticket o Recibo (Opcional):", type=["png", "jpg", "jpeg", "pdf"])
-        # Comprobamos si hay algún bloqueo activo antes de dejar usar el botón
-    bloqueo_msg = comprobar_bloqueo_concurrencia(quien_opera)
-    
-    if bloqueo_msg:
-        st.warning(bloqueo_msg)
-        st.button("🔒 GUARDADO DESACTIVADO TEMPORALMENTE", disabled=True, use_container_width=True)
-    else:
-        if st.button("Asentar Asiento Contable", use_container_width=True):
-            if not concepto.strip(): 
-                st.error("Por favor, añada una descripción o detalle antes de guardar.")
-            else:
-                # Registramos que esta persona toma el control del sistema
-                registrar_presencia_usuario(quien_opera, "Registro Manual")
-                n_arc = ""
-                if up_file is not None:
-                    n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
-                    guardar_archivo_nube(n_arc, up_file.getbuffer())
-                conn = conectar_bd(); cursor = conn.cursor()
-                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc))
-                conn.commit(); conn.sync()
-                st.success("Asiento grabado en la nube."); st.rerun()
-    st.markdown("---")
-    with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
-        st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
-        df_plantilla = pd.DataFrame([
-            {"Referencia": "REM-2026-001", "Hermano": "Manuel García López", "IBAN": "ES9121000418450200051332", "Importe": 35.00, "Vencimiento": "2026-11-05", "Estado": "Pagado"}
-        ])
-        st.download_button(label="📥 Descargar Plantilla Excel de Ejemplo (.xlsx)", data=generar_excel(df_plantilla), file_name="Plantilla_Remesa_Ejemplo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
-        if archivo_excel is not None:
-            procesar_panel_remesas(archivo_excel)
-with p_fil:
-    with st.container(border=True):
-        cf1, cf2, cf3, cf4 = st.columns(4)
-        with cf1: f_cuenta = st.selectbox("Cuenta:", ["Todas", "Caja", "Banco"]); f_tipo = st.selectbox("Tipo:", ["Todos", "Ingreso", "Gasto"])
-        with cf2: f_pago = st.selectbox("Forma Pago:", ["Todas", "Efectivo", "Tarjeta / TPV Físico", "Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
-        with cf3:
-            try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
-            except: r_fechas = date.today()
-        with cf4: f_texto = st.text_input("Buscar Concepto:", placeholder="Ej: Lotería, cuota...")
-    
-    with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
-        st.caption("Introduce el número de asiento (ej: 14) para modificarlo o adjuntarle una imagen/ticket.")
-        id_a_editar = st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed")
-        if id_a_editar:
-            df_buscado = df_global.loc[df_global['id'] == id_a_editar]
-            if not df_buscado.empty:
-                r_edit = df_buscado.iloc[0]
-                c_ed1, c_ed2 = st.columns(2)
-                ed_fec = c_ed1.text_input("Fecha:", value=str(r_edit.get('Fecha')), key="cef_fec")
-                ed_cue = c_ed1.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_edit.get('Cuenta')=="Caja" else 1, key="cef_cue")
-                p_t_op = obtener_partidas("Ingreso") if r_edit.get('Tipo') == "Ingreso" else obtener_partidas("Gasto")
-                idx_p_op = p_t_op.index(r_edit.get('Partida')) if r_edit.get('Partida') in p_t_op else 0
-                ed_par = c_ed1.selectbox("Partida:", p_t_op, index=idx_p_op, key="cef_par")
-                ed_con = c_ed2.text_input("Concepto:", value=str(r_edit.get('Concepto')), key="cef_con")
-                ed_imp = c_ed2.number_input("Importe (€):", value=float(r_edit.get('Importe (€)')), min_value=0.01, step=1.0, key="cef_imp")
-                ed_file = c_ed2.file_uploader("📷 Añadir o Cambiar Foto del Ticket/Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="cef_file")
-                if st.button("💾 GUARDAR CAMBIOS EN EL ASIENTO", use_container_width=True, key="cef_btn_save"):
-                    n_arc = r_edit.get('Comprobante') if r_edit.get('Comprobante') else ""
-                    if ed_file is not None:
-                        n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
-                        guardar_archivo_nube(n_arc, ed_file.getbuffer())
-                    conn = conectar_bd(); cur = conn.cursor()
-                    cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, n_arc, id_a_editar))
-                    conn.commit(); conn.sync()
-                    st.success("¡Asiento actualizado correctamente!"); st.rerun()
-            else:
-                st.caption("Introduce un número de asiento válido para ver sus datos.")
-    df_f = df_global.copy()
-    if f_cuenta != "Todas": df_f = df_f.loc[df_f['Cuenta'] == f_cuenta]
-    if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
-    if f_pago != "Todas": df_f = df_f.loc[df_f['Forma Pago'] == f_pago]
-    if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False)]
-    if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
-        f_ini_d, f_fin_d = r_fechas
-        df_f = df_f.loc[(df_f['Fecha'] >= f_ini_d.strftime("%Y-%m-%d")) & (df_f['Fecha'] <= (f_fin_d.strftime("%Y-%m-%d") + " 23:59"))]
-    
-    if not df_f.empty:
-        v_ing = df_f.loc[df_f['Tipo'] == 'Ingreso', 'Importe (€)'].sum(); v_gas = df_f.loc[df_f['Tipo'] == 'Gasto', 'Importe (€)'].sum()
-        with st.container(border=True):
-            ct1, ct2, ct3 = st.columns(3)
-            ct1.markdown(f"**Suma Ingresos:** <font color='green'><b>{v_ing:,.2f} €</b></font>", unsafe_allow_html=True)
-            ct2.markdown(f"**Suma Gastos:** <font color='red'><b>-{v_gas:,.2f} €</b></font>", unsafe_allow_html=True)
-            ct3.markdown(f"**Rendimiento Neto:** <b>{(v_ing - v_gas):,.2f} €</b>", unsafe_allow_html=True)
-        cb1, cb2 = st.columns(2)
-        with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
-        with cb2: st.download_button(label="📊 Exportar Solo Movimientos (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
-            for idx, row in df_f.iterrows():
-                r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
-                with st.container(border=True):
-                    ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
-                    ca.markdown(f"**#{r_id}**")
-                    cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
-                    c_val = "green" if r_tipo == 'Ingreso' else "red"
-                    cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
-                    
-                    txt_b = "📥 Preparar Justificante" if r_tipo == 'Ingreso' else "📄 Preparar Recibí"
-                    if cd.button(txt_b, key=f"prep_pdf_{r_id}", use_container_width=True):
-                        st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
-                    if f"pdf_listo_{r_id}" in st.session_state:
-                        cd.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
-                    if r_com:
-                        if cd.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
-                            st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
-                        if st.session_state.get(f"img_lista_{r_id}"):
-                            cd.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)
-                    if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
-                        borrar_registro(r_id)
-                        st.rerun()
-    else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
+s_caja = caja_ini + df_reales.loc[(df_reales['Cuenta'] == 'Caja') & (df_reales['Tipo'] == 'Ingreso') & (df_reales['Pendiente'] == 0), 'Importe'].sum() - df_reales.loc[(df_reales['Cuenta'] == 'Caja') & (df_reales['Tipo'] == 'Gasto') & (df_reales['Pendiente'] == 0), 'Importe'].sum() + df_traspasos.loc[df_traspasos['destino'] == 'Caja', 'importe'].sum() - df_traspasos.loc[df_traspasos['origen'] == 'Caja', 'importe'].sum()
+s_banco = banco_ini + df_reales.loc[(df_reales['Cuenta'] == 'Banco') & (df_reales['Tipo'] == 'Ingreso') & (df_reales['Pendiente'] == 0), 'Importe'].sum() - df_reales.loc[(df_reales['Cuenta'] == 'Banco') & (df_reales['Tipo'] == 'Gasto') & (df_reales['Pendiente'] == 0), 'Importe'].sum() + df_traspasos.loc[df_traspasos['destino'] == 'Banco', 'importe'].sum() - df_traspasos.loc[df_traspasos['origen'] == 'Banco', 'importe'].sum()
 with p_pre:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
     df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
@@ -644,22 +438,29 @@ with p_pre:
         val_actual_p = float(dict_pres.get(p_sel, 0.0))
         nuevo_pres = st.number_input("Presupuesto Asignado (€):", min_value=0.0, value=val_actual_p, step=50.0, format="%.2f")
         if st.button("💾 Fijar Presupuesto", use_container_width=True):
-            conn = conectar_bd(); cur = conn.cursor(); cur.execute("INSERT OR REPLACE INTO presupuestos (partida, tipo, importe_presupuestado) VALUES (?, ?, ?)", (p_sel, p_tipo_sel, nuevo_pres)); conn.commit(); conn.sync(); st.success("Presupuesto actualizado."); st.rerun()
+            conn = conectar_bd(); cur = conn.cursor()
+            cur.execute("INSERT OR REPLACE INTO presupuestos (partida, tipo, importe_presupuestado) VALUES (?, ?, ?)", (p_sel, p_tipo_sel, nuevo_pres))
+            conn.commit(); conn.sync()
+            st.success("Presupuesto actualizado."); st.rerun()
         st.markdown("---")
         st.markdown("**🔒 Cierre de Ejercicio Anual**")
         st.warning("Genera el Acta Oficial en PDF y Excel del año, limpia el libro diario y traspasa el saldo final como fondo inicial del nuevo curso.")
         anio_cierre = st.text_input("Nombre del Ejercicio a cerrar:", value=str(date.today().year))
         if st.button("⚠️ EJECUTAR CIERRE ANUAL", use_container_width=True):
             if not df_global.empty:
-                s_c_fin = caja_ini + df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-                s_b_fin = banco_ini + df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-                pdf_cierre_bytes = generar_pdf_cierre(df_global, anio_cierre, caja_ini, banco_ini, s_c_fin, s_b_fin).getvalue()
+                pdf_cierre_bytes = generar_pdf_cierre(df_global, anio_cierre, caja_ini, banco_ini, s_caja, s_banco).getvalue()
                 st.session_state["ultimo_pdf_cierre"] = pdf_cierre_bytes
                 st.session_state["ultimo_excel_cierre"] = generar_excel(df_global).getvalue()
                 st.session_state["ultimo_anio_cierre"] = anio_cierre
-                conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio=?, banco_inicio=? WHERE id=1", (s_c_fin, s_b_fin)); cur.execute("DELETE FROM contabilidad"); cur.execute("DELETE FROM archivos_nube"); conn.commit(); conn.sync()
+                conn = conectar_bd(); cur = conn.cursor()
+                cur.execute("UPDATE saldos_iniciales SET caja_inicio=?, banco_inicio=? WHERE id=1", (s_caja, s_banco))
+                cur.execute("DELETE FROM contabilidad")
+                cur.execute("DELETE FROM archivos_nube")
+                cur.execute("DELETE FROM traspasos_internos")
+                conn.commit(); conn.sync()
                 st.rerun()
-            else: st.error("No hay apuntes que cerrar.")
+            else:
+                st.error("No hay apuntes que cerrar.")
         if "ultimo_pdf_cierre" in st.session_state:
             st.success(f"✅ Ejercicio {st.session_state['ultimo_anio_cierre']} cerrado. Descarga tus actas:")
             st.download_button(label=f"🖨️ DESCARGAR ACTA DE CIERRE {st.session_state['ultimo_anio_cierre']} (PDF)", data=st.session_state["ultimo_pdf_cierre"], file_name=f"Acta_Cierre_{st.session_state['ultimo_anio_cierre']}.pdf", mime="application/pdf", use_container_width=True)
@@ -689,7 +490,6 @@ with p_pre:
                 st.bar_chart(df_comp.set_index("Partida")[["Presupuestado (€)", "Ejecutado (€)"]])
             st.markdown("---")
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
-
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
@@ -697,21 +497,29 @@ with p_con:
         caja_inf = st.number_input("Dinero inicial en Caja Física (€):", min_value=0.0, value=float(caja_ini), step=50.0, format="%.2f")
         banco_inf = st.number_input("Dinero inicial en Cuenta Bancaria (€):", min_value=0.0, value=float(banco_ini), step=50.0, format="%.2f")
         if st.button("💾 Guardar Saldos Iniciales", use_container_width=True):
-            conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf)); conn.commit(); conn.sync(); st.success("Saldos actualizados."); st.rerun()
+            conn = conectar_bd(); cur = conn.cursor()
+            cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf))
+            conn.commit(); conn.sync(); st.success("Saldos actualizados."); st.rerun()
         mostrar_panel_respaldos(df_global)
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
         c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: Lotería de Navidad")
         if st.button("Guardar Nueva Partida", use_container_width=True):
-            if not c_nombre.strip(): st.error("Escriba el nombre de la partida.")
+            if not c_nombre.strip():
+                st.error("Escriba el nombre de la partida.")
             else:
-                try: conn = conectar_bd(); cur = conn.cursor(); cur.execute("INSERT INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (c_tipo, c_nombre.strip())); conn.commit(); conn.sync(); st.success("Partida añadida."); st.rerun()
-                except: st.error("Este concepto ya existe.")
+                try:
+                    conn = conectar_bd(); cur = conn.cursor()
+                    cur.execute("INSERT INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (c_tipo, c_nombre.strip()))
+                    conn.commit(); conn.sync(); st.success("Partida añadida."); st.rerun()
+                except:
+                    st.error("Este concepto ya existe.")
         st.markdown("---")
         st.markdown("**📋 Gestionar Todos los Conceptos (Predeterminados y Nuevos)**")
         df_p = leer_tabla_turso("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre")
-        if df_p.empty: st.caption("No hay partidas registradas.")
+        if df_p.empty:
+            st.caption("No hay partidas registradas.")
         else:
             with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=True):
                 for _, r_p in df_p.iterrows():
@@ -730,7 +538,10 @@ with p_con:
                                             cur.execute("UPDATE contabilidad SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
                                             cur.execute("UPDATE presupuestos SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
                                             conn.commit(); conn.sync(); st.rerun()
-                                        except: st.error("Ya existe un concepto con ese nombre.")
+                                        except:
+                                            st.error("Ya existe un concepto con ese nombre.")
                         with cp3:
                             if st.button("❌", key=f"dl_p_{pid}", use_container_width=True):
-                                conn = conectar_bd(); cur = conn.cursor(); cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,)); conn.commit(); conn.sync(); st.rerun()
+                                conn = conectar_bd(); cur = conn.cursor()
+                                cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,))
+                                conn.commit(); conn.sync(); st.rerun()
