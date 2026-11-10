@@ -471,9 +471,14 @@ st.markdown("---")
 
 def obtener_suma_sql(sql):
     try:
+        # Forzamos la actualización con el servidor en la nube antes de leer el total
+        conectar_bd().sync()
         _, filas = ejecutar_turso_http(sql)
-        if filas and filas[0][0] is not None: return float(filas[0][0])
-    except: pass
+        if filas and filas is not None and len(filas) > 0:
+            if filas[0][0] is not None:
+                return float(filas[0][0])
+    except:
+        pass
     return 0.0
 
 # Consultas por SQL directo a Turso (Evita errores de DataFrames vacíos)
