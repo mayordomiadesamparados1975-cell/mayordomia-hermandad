@@ -210,6 +210,12 @@ def generar_excel(df):
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
         df.drop(columns=['Comprobante'], errors='ignore').to_excel(writer, index=False, sheet_name='Movimientos')
+        try:
+            df_t_ex = leer_tabla_turso("SELECT id as 'Nº Traspaso', fecha as 'Fecha', origen as 'Origen', destino as 'Destino', concepto as 'Motivo / Concepto', importe as 'Importe (€)' FROM traspasos_internos ORDER BY id ASC")
+            if not df_t_ex.empty:
+                df_t_ex.to_excel(writer, index=False, sheet_name='Traspasos_Internos')
+        except:
+            pass
     buf.seek(0); return buf
 def generar_backup_zip():
     buf = io.BytesIO()
