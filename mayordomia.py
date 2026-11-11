@@ -448,6 +448,24 @@ def dibujar_tabla_movimientos(df_f):
             if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
                 borrar_registro(r_id)
                 st.rerun()
+def dibujar_tabla_traspasos(df_t):
+    if df_t.empty:
+        st.caption("No se han registrado traspasos internos de fondos en este ejercicio.")
+        return
+    # Ordenamos los traspasos para que el más reciente aparezca arriba del todo
+    df_t = df_t.sort_values(by="id", ascending=False)
+    for idx, row in df_t.iterrows():
+        t_id = row.get('id')
+        t_fec = row.get('fecha')
+        t_ori = row.get('origen')
+        t_des = row.get('destino')
+        t_imp = float(row.get('importe'))
+        t_con = row.get('concepto')
+        with st.container(border=True):
+            cx, cy, cz = st.columns((1.2, 5.8, 3.0))
+            cx.markdown(f"**🔄 #{t_id}**")
+            cy.markdown(f"**Traspaso de Fondos:** {t_con}<br/><small style='color:gray;'>{t_fec} | Origen: <b>{t_ori}</b> &rarr; Destino: <b>{t_des}</b></small>", unsafe_allow_html=True)
+            cz.markdown(f"<h4 style='color:#b45309; margin:0; text-align:right;'>{t_imp:,.2f} €</h4>", unsafe_allow_html=True)
 conn = conectar_bd()
 df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
@@ -688,7 +706,12 @@ with p_fil:
         with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
         with cb2: st.download_button(label="📊 Exportar Solo Movimientos (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
-            for idx, row in df_f.iterrows():
+                    st.markdown("---")
+        st.markdown("#### 🔄 Auditoría de Movimientos Internos de Tesorería")
+        df_t_vista = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos")
+        with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
+            dibujar_tabla_traspasos(df_t_vista)
+                for idx, row in df_f.iterrows():
                 r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
                 with st.container(border=True):
                     ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
