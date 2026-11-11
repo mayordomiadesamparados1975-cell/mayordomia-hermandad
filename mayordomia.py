@@ -658,7 +658,7 @@ with p_fil:
             try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
             except: r_fechas = date.today()
         with cf4: f_texto = st.text_input("Buscar Concepto:", placeholder="Ej: Lotería, cuota...")
-    
+
     with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
         st.caption("Introduce el número de asiento (ej: 14) para modificarlo o adjuntarle una imagen/ticket.")
         id_a_editar = st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed")
@@ -686,6 +686,7 @@ with p_fil:
                     st.success("¡Asiento actualizado correctamente!"); st.rerun()
             else:
                 st.caption("Introduce un número de asiento válido para ver sus datos.")
+
     df_f = df_global.copy()
     if f_cuenta != "Todas": df_f = df_f.loc[df_f['Cuenta'] == f_cuenta]
     if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
@@ -694,7 +695,7 @@ with p_fil:
     if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
         f_ini_d, f_fin_d = r_fechas
         df_f = df_f.loc[(df_f['Fecha'] >= f_ini_d.strftime("%Y-%m-%d")) & (df_f['Fecha'] <= (f_fin_d.strftime("%Y-%m-%d") + " 23:59"))]
-    
+
     if not df_f.empty:
         v_ing = df_f.loc[df_f['Tipo'] == 'Ingreso', 'Importe (€)'].sum(); v_gas = df_f.loc[df_f['Tipo'] == 'Gasto', 'Importe (€)'].sum()
         with st.container(border=True):
@@ -706,34 +707,15 @@ with p_fil:
         with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
         with cb2: st.download_button(label="📊 Exportar Solo Movimientos (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
-                    st.markdown("---")
-        st.markdown("#### 🔄 Auditoría de Movimientos Internos de Tesorería")
-        df_t_vista = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos")
-        with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
-            dibujar_tabla_traspasos(df_t_vista)
-                for idx, row in df_f.iterrows():
-                r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
-                with st.container(border=True):
-                    ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
-                    ca.markdown(f"**#{r_id}**")
-                    cb.markdown(f"**{r_par}** - {r_con}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
-                    c_val = "green" if r_tipo == 'Ingreso' else "red"
-                    cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
-                    
-                    txt_b = "📥 Preparar Justificante" if r_tipo == 'Ingreso' else "📄 Preparar Recibí"
-                    if cd.button(txt_b, key=f"prep_pdf_{r_id}", use_container_width=True):
-                        st.session_state[f"pdf_listo_{r_id}"] = generar_pdf_recibo(row).getvalue()
-                    if f"pdf_listo_{r_id}" in st.session_state:
-                        cd.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
-                    if r_com:
-                        if cd.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
-                            st.session_state[f"img_lista_{r_id}"] = leer_archivo_nube(r_com)
-                        if st.session_state.get(f"img_lista_{r_id}"):
-                            cd.download_button(label="⬇️ Descargar Ticket", data=st.session_state[f"img_lista_{r_id}"], file_name=r_com, key=f"dl_img_{r_id}", use_container_width=True)
-                    if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
-                        borrar_registro(r_id)
-                        st.rerun()
-    else: st.info("No hay movimientos que coincidan con los filtros seleccionados.")
+            dibujar_tabla_movimientos(df_f)
+    else:
+        st.info("No hay movimientos que coincidan con los filtros seleccionados.")
+
+    st.markdown("---")
+    st.markdown("#### 🔄 Auditoría de Movimientos Internos de Tesorería")
+    df_t_vista = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos")
+    with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
+        dibujar_tabla_traspasos(df_t_vista)
 with p_pre:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
     df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
