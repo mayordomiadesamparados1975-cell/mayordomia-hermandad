@@ -334,7 +334,22 @@ def generar_pdf_resumen(df, titulo_reporte):
     t_datos.append([Paragraph("<b>TOTAL INGRESOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{t_ing:,.2f} €</b>", n_st)])
     t_datos.append([Paragraph("<b>TOTAL GASTOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>-{t_gas:,.2f} €</b>", n_st)])
     t_datos.append([Paragraph("<b>RESULTADO NETO DEL EXTRACTO</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{(t_ing - t_gas):,.2f} €</b>", n_st)])
-    t = RLTable(t_datos, colWidths=(75, 45, 45, 120, 250, 115, 70)); t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('BOTTOMPADDING', (0,0), (-1,-1), 4), ('TOPPADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LINEABOVE', (0,-3), (-1,-3), 1.2, burdeos)])); story.append(t); doc.build(story, onFirstPage=marca_agua_horizontal, onLaterPages=marca_agua_horizontal); buf.seek(0); return buf
+    t = RLTable(t_datos, colWidths=(75, 45, 45, 120, 250, 115, 70)); t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('BOTTOMPADDING', (0,0), (-1,-1), 4), ('TOPPADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE'), ('LINEABOVE', (0,-3), (-1,-3), 1.2, burdeos)])); story.append(t)
+
+    try:
+        df_t_pdf = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos ORDER BY id ASC")
+        if not df_t_pdf.empty:
+            story.append(Spacer(1, 18))
+            story.append(Paragraph("<b>MOVIMIENTOS INTERNOS DE TESORERÍA (TRASPASOS ENTRE CAJA Y BANCO)</b>", ParagraphStyle('SubT', parent=styles['Normal'], fontSize=9, textColor=burdeos)))
+            story.append(Spacer(1, 6))
+            t_trasp = [[Paragraph("<b><font color='white'>Nº</font></b>", n_st), Paragraph("<b><font color='white'>Fecha</font></b>", n_st), Paragraph("<b><font color='white'>Origen</font></b>", n_st), Paragraph("<b><font color='white'>Destino</font></b>", n_st), Paragraph("<b><font color='white'>Motivo / Concepto</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_st)]]
+            for _, ft in df_t_pdf.iterrows():
+                t_trasp.append([Paragraph(f"#{ft.get('id')}", n_st), Paragraph(str(ft.get('fecha'))[:16], n_st), Paragraph(str(ft.get('origen')), n_st), Paragraph(str(ft.get('destino')), n_st), Paragraph(str(ft.get('concepto'))[:65], n_st), Paragraph(f"{float(ft.get('importe')):,.2f} €", n_st)])
+            tt = RLTable(t_trasp, colWidths=(45, 85, 75, 75, 360, 80)); tt.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('BOTTOMPADDING', (0,0), (-1,-1), 4), ('TOPPADDING', (0,0), (-1,-1), 4), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tt)
+    except:
+        pass
+
+    doc.build(story, onFirstPage=marca_agua_horizontal, onLaterPages=marca_agua_horizontal); buf.seek(0); return buf
 def generar_pdf_cierre(df, anio, c_ini, b_ini, c_fin, b_fin):
     buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
     t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=16, leading=20, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=10, leading=13, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=11); b_st = ParagraphStyle('B', parent=styles['Normal'], fontSize=9, leading=12)
