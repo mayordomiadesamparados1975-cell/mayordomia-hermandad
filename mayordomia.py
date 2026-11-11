@@ -469,23 +469,23 @@ def dibujar_tabla_traspasos(df_t):
     st.markdown("---")
     with st.expander("✏️ Editar o Eliminar un Traspaso Interno (por Nº #)", expanded=False):
         st.caption("Introduce el número del traspaso (ej: 1) para corregir su importe, dirección o eliminarlo.")
-        id_t_ed = st.number_input("Número de Traspaso (#):", min_value=1, step=1, key="id_traspaso_ed")
+        id_t_ed = int(st.number_input("Número de Traspaso (#):", min_value=1, step=1, key="id_traspaso_ed"))
         df_t_sel = df_t.loc[df_t['id'] == id_t_ed]
         if not df_t_sel.empty:
             rt = df_t_sel.iloc[0]
             ct1, ct2 = st.columns(2)
-            ed_t_fec = ct1.text_input("Fecha:", value=str(rt.get('fecha')), key="et_fec")
-            ed_t_ori = ct1.selectbox("Origen (Sale de):", ["Caja", "Banco"], index=0 if rt.get('origen') == "Caja" else 1, key="et_ori")
+            ed_t_fec = ct1.text_input("Fecha:", value=str(rt.get('fecha')), key=f"et_fec_{id_t_ed}")
+            ed_t_ori = ct1.selectbox("Origen (Sale de):", ["Caja", "Banco"], index=0 if rt.get('origen') == "Caja" else 1, key=f"et_ori_{id_t_ed}")
             ed_t_des = "Banco" if ed_t_ori == "Caja" else "Caja"
             ct1.markdown(f"➡️ **Destino (Entra en):** `{ed_t_des}`")
-            ed_t_imp = ct2.number_input("Importe (€):", value=float(rt.get('importe')), min_value=0.01, step=10.0, format="%.2f", key="et_imp")
-            ed_t_con = ct2.text_input("Motivo / Concepto:", value=str(rt.get('concepto')), key="et_con")
+            ed_t_imp = ct2.number_input("Importe (€):", value=float(rt.get('importe')), min_value=0.01, step=10.0, format="%.2f", key=f"et_imp_{id_t_ed}")
+            ed_t_con = ct2.text_input("Motivo / Concepto:", value=str(rt.get('concepto')), key=f"et_con_{id_t_ed}")
 
             b_t1, b_t2 = st.columns(2)
-            if b_t1.button("💾 Guardar Cambios del Traspaso", use_container_width=True, key="btn_sv_trasp"):
+            if b_t1.button("💾 Guardar Cambios del Traspaso", use_container_width=True, key=f"btn_sv_trasp_{id_t_ed}"):
                 ejecutar_turso_http("UPDATE traspasos_internos SET fecha=?, origen=?, destino=?, importe=?, concepto=? WHERE id=?", (ed_t_fec, ed_t_ori, ed_t_des, ed_t_imp, ed_t_con.strip(), id_t_ed))
                 st.success("Traspaso actualizado."); st.rerun()
-            if b_t2.button("🗑️ Eliminar Traspaso", use_container_width=True, key="btn_dl_trasp"):
+            if b_t2.button("🗑️ Eliminar Traspaso", use_container_width=True, key=f"btn_dl_trasp_{id_t_ed}"):
                 ejecutar_turso_http("DELETE FROM traspasos_internos WHERE id=?", (id_t_ed,))
                 st.success("Traspaso eliminado."); st.rerun()
         else:
