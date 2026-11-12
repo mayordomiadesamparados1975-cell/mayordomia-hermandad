@@ -206,10 +206,16 @@ def borrar_definitivo(id_reg):
         cursor.execute("DELETE FROM archivos_nube WHERE nombre = ?", (itemgetter(0)(arc),))
     cursor.execute("DELETE FROM contabilidad WHERE id = ?", (id_reg,))
 
-def generar_excel(df):
+def generar_excel(df, agrupar=False):
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-        df.drop(columns=['Comprobante'], errors='ignore').to_excel(writer, index=False, sheet_name='Movimientos')
+        df_export = df.drop(columns=['Comprobante'], errors='ignore').copy()
+        if agrupar and not df_export.empty:
+            df_export = df_export.sort_values(by=['Partida', 'Fecha'], ascending=[True, True])
+        df_export.to_excel(writer, index=False, sheet_name='Movimientos')
+        if agrupar and not df_export.empty:
+            df_resumen = df_export.groupby(['Tipo', 'Partida'], as_index=False)['Importe (€)'].sum()
+            df_resumen.to_excel(writer, index=False, sheet_name='Resumen_Por_Conceptos')
         try:
             df_t_ex = leer_tabla_turso("SELECT id as 'Nº Traspaso', fecha as 'Fecha', origen as 'Origen', destino as 'Destino', concepto as 'Motivo / Concepto', importe as 'Importe (€)' FROM traspasos_internos ORDER BY id ASC")
             if not df_t_ex.empty:
@@ -323,7 +329,7 @@ def generar_pdf_recibo(row):
             tf = RLTable([[Paragraph("<b>___________________________</b><br/>Páguese, El Mayordomo", ParagraphStyle('F1', alignment=1, fontSize=10)), Paragraph("<b>___________________________</b><br/>Recibí, El Beneficiario / Perceptor", ParagraphStyle('F2', alignment=1, fontSize=10))]], colWidths=(250, 250)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
         if i == 0: story.append(PageBreak())
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
-def generar_pdf_resumen(df, titulo_reporte):
+def generar_pdf_resumen(df, titulo_reporte, agrupar=False):
     buf = io.BytesIO(); doc = SimpleDocTemplate(buf, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30); story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020")
     t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=15, leading=18, alignment=1, textColor=burdeos); s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=9, leading=12, alignment=1, textColor=colors.gray); n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=11)
     if os.path.exists("escudo.png"):
@@ -332,11 +338,26 @@ def generar_pdf_resumen(df, titulo_reporte):
     story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st)); story.append(Paragraph(f"Extracto de Cuentas Oficial - {titulo_reporte} | Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_st)); story.append(Spacer(1, 14))
     t_datos = [[Paragraph("<b><font color='white'>Fecha</font></b>", n_st), Paragraph("<b><font color='white'>Tipo</font></b>", n_st), Paragraph("<b><font color='white'>Cuenta</font></b>", n_st), Paragraph("<b><font color='white'>Partida</font></b>", n_st), Paragraph("<b><font color='white'>Concepto / Detalle</font></b>", n_st), Paragraph("<b><font color='white'>Forma Pago</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_st)]]
     t_ing, t_gas = 0.0, 0.0
-    for _, f in df.iterrows():
-        v = f.get('Importe (€)'); v_str = f"-{v:,.2f} €" if f.get('Tipo') == 'Gasto' else f"{v:,.2f} €"
-        if f.get('Tipo') == 'Gasto': t_gas += v
-        else: t_ing += v
-        t_datos.append([Paragraph(str(f.get('Fecha'))[:16], n_st), Paragraph(str(f.get('Tipo')), n_st), Paragraph(str(f.get('Cuenta')), n_st), Paragraph(str(f.get('Partida'))[:28], n_st), Paragraph(str(f.get('Concepto'))[:55], n_st), Paragraph(str(f.get('Forma Pago')), n_st), Paragraph(v_str, n_st)])
+    
+    if agrupar:
+        df_proc = df.sort_values(by=['Partida', 'Fecha'], ascending=[True, True])
+        for part_nom, grupo in df_proc.groupby('Partida', sort=False):
+            sub_ing, sub_gas = 0.0, 0.0
+            for _, f in grupo.iterrows():
+                v = float(f.get('Importe (€)')); v_str = f"-{v:,.2f} €" if f.get('Tipo') == 'Gasto' else f"{v:,.2f} €"
+                if f.get('Tipo') == 'Gasto': t_gas += v; sub_gas += v
+                else: t_ing += v; sub_ing += v
+                t_datos.append([Paragraph(str(f.get('Fecha'))[:16], n_st), Paragraph(str(f.get('Tipo')), n_st), Paragraph(str(f.get('Cuenta')), n_st), Paragraph(str(f.get('Partida'))[:28], n_st), Paragraph(str(f.get('Concepto'))[:55], n_st), Paragraph(str(f.get('Forma Pago')), n_st), Paragraph(v_str, n_st)])
+            sub_neto = sub_ing - sub_gas
+            sub_str = f"-{abs(sub_neto):,.2f} €" if sub_neto < 0 else f"{sub_neto:,.2f} €"
+            t_datos.append([Paragraph(f"<b>SUBTOTAL {str(part_nom).upper()}</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{sub_str}</b>", n_st)])
+    else:
+        for _, f in df.iterrows():
+            v = float(f.get('Importe (€)')); v_str = f"-{v:,.2f} €" if f.get('Tipo') == 'Gasto' else f"{v:,.2f} €"
+            if f.get('Tipo') == 'Gasto': t_gas += v
+            else: t_ing += v
+            t_datos.append([Paragraph(str(f.get('Fecha'))[:16], n_st), Paragraph(str(f.get('Tipo')), n_st), Paragraph(str(f.get('Cuenta')), n_st), Paragraph(str(f.get('Partida'))[:28], n_st), Paragraph(str(f.get('Concepto'))[:55], n_st), Paragraph(str(f.get('Forma Pago')), n_st), Paragraph(v_str, n_st)])
+            
     t_datos.append([Paragraph("<b>TOTAL INGRESOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{t_ing:,.2f} €</b>", n_st)])
     t_datos.append([Paragraph("<b>TOTAL GASTOS FILTRADOS</b>", n_st), "", "", "", "", "", Paragraph(f"<b>-{t_gas:,.2f} €</b>", n_st)])
     t_datos.append([Paragraph("<b>RESULTADO NETO DEL EXTRACTO</b>", n_st), "", "", "", "", "", Paragraph(f"<b>{(t_ing - t_gas):,.2f} €</b>", n_st)])
@@ -703,6 +724,10 @@ with p_fil:
             try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
             except: r_fechas = date.today()
         with cf4: f_texto = st.text_input("Buscar Concepto:", placeholder="Ej: Lotería, cuota...")
+        
+        partidas_disponibles = sorted(list(df_global['Partida'].dropna().unique())) if not df_global.empty else []
+        f_partidas = st.multiselect("Filtrar por Partidas / Conceptos específicos (vacío = todas):", partidas_disponibles, default=[])
+        agrupar_conceptos = st.checkbox("📊 Agrupar informe por Conceptos / Partidas (con subtotales en PDF y hoja resumen en Excel)", value=False)
 
     with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
         st.caption("Introduce el número de asiento (ej: 14) para modificarlo o adjuntarle una imagen/ticket.")
@@ -736,6 +761,7 @@ with p_fil:
     if f_cuenta != "Todas": df_f = df_f.loc[df_f['Cuenta'] == f_cuenta]
     if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
     if f_pago != "Todas": df_f = df_f.loc[df_f['Forma Pago'] == f_pago]
+    if f_partidas: df_f = df_f.loc[df_f['Partida'].isin(f_partidas)]
     if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False)]
     if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
         f_ini_d, f_fin_d = r_fechas
@@ -749,8 +775,9 @@ with p_fil:
             ct2.markdown(f"**Suma Gastos:** <font color='red'><b>-{v_gas:,.2f} €</b></font>", unsafe_allow_html=True)
             ct3.markdown(f"**Rendimiento Neto:** <b>{(v_ing - v_gas):,.2f} €</b>", unsafe_allow_html=True)
         cb1, cb2 = st.columns(2)
-        with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, f"Filtro ({f_cuenta} | {f_tipo})"), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
-        with cb2: st.download_button(label="📊 Exportar Solo Movimientos (.xlsx)", data=generar_excel(df_f), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        subtitulo_pdf = f"Filtro ({f_cuenta} | {f_tipo})" + (" - Agrupado por Conceptos" if agrupar_conceptos else "")
+        with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, subtitulo_pdf, agrupar=agrupar_conceptos), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
+        with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
     else:
