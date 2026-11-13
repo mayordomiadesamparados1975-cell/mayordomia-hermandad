@@ -733,7 +733,7 @@ with p_fil:
             try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
             except: r_fechas = date.today()
         with cf4: f_texto = st.text_input("Buscar Texto libre:", placeholder="Ej: Factura, Lotería...")
-        
+
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             partidas_disponibles = sorted(list(df_global['Partida'].dropna().unique())) if not df_global.empty else []
@@ -741,16 +741,16 @@ with p_fil:
         with col_f2:
             proveedores_disp = sorted([p for p in df_global['Proveedor'].dropna().unique() if str(p).strip() != ""]) if not df_global.empty else []
             f_proveedor = st.selectbox("Filtrar por Proveedor / Hermano:", ["Todos"] + proveedores_disp)
-            
+
         agrupar_conceptos = st.checkbox("📊 Agrupar informe por Conceptos / Partidas (con subtotales en PDF y hoja resumen en Excel)", value=False)
 
-            with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
+    with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
         st.caption("Introduce el número de asiento (ej: 14) para modificar cualquier dato o adjuntarle una imagen/ticket.")
         id_a_editar = int(st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed"))
         if id_a_editar:
             df_buscado = df_global.loc[df_global['id'] == id_a_editar]
             if not df_buscado.empty:
-                r_edit = df_buscado.iloc[0]
+                r_edit = df_buscado.iloc
                 c_ed1, c_ed2 = st.columns(2)
                 ed_fec = c_ed1.text_input("Fecha:", value=str(r_edit.get('Fecha')), key=f"cef_fec_{id_a_editar}")
                 ed_cue = c_ed1.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_edit.get('Cuenta')=="Caja" else 1, key=f"cef_cue_{id_a_editar}")
@@ -780,13 +780,14 @@ with p_fil:
                     st.success("¡Asiento actualizado correctamente!"); st.rerun()
             else:
                 st.caption("Introduce un número de asiento válido para ver sus datos.")
+
     df_f = df_global.copy()
     if f_cuenta != "Todas": df_f = df_f.loc[df_f['Cuenta'] == f_cuenta]
     if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
     if f_pago != "Todas": df_f = df_f.loc[df_f['Forma Pago'] == f_pago]
     if f_partidas: df_f = df_f.loc[df_f['Partida'].isin(f_partidas)]
     if f_proveedor != "Todos": df_f = df_f.loc[df_f['Proveedor'] == f_proveedor]
-    if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False) | df_f['Proveedor'].str.contains(f_texto, case=False)]
+    if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False) | df_f['Proveedor'].str.contains(f_texto, case=False) | df_f['Nº Factura'].str.contains(f_texto, case=False)]
     if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
         f_ini_d, f_fin_d = r_fechas
         df_f = df_f.loc[(df_f['Fecha'] >= f_ini_d.strftime("%Y-%m-%d")) & (df_f['Fecha'] <= (f_fin_d.strftime("%Y-%m-%d") + " 23:59"))]
