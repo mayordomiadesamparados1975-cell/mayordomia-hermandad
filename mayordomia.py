@@ -514,7 +514,8 @@ def generar_informe_arzobispado(df_global, dict_pres):
         totales_bloque[tipo_op]["p"] = tot_g_p
         totales_bloque[tipo_op]["r"] = tot_g_r
         filas_resumen_3.append({"Tipo": f"TOTAL {tipo_op.upper()}S", "Grupo (3 dígitos)": "---", "Nombre del Grupo Oficial": f"SUMA TOTAL {tipo_op.upper()}S", "Presupuesto (€)": tot_g_p, "Real (€)": tot_g_r, "Desviación (€)": tot_g_r - tot_g_p, "% Realizado": ""})
-            df_det = pd.DataFrame(filas_detalle)
+
+    df_det = pd.DataFrame(filas_detalle)
     df_res3 = pd.DataFrame(filas_resumen_3)
     
     buf_ex = io.BytesIO()
@@ -522,8 +523,8 @@ def generar_informe_arzobispado(df_global, dict_pres):
         df_res3.to_excel(writer, index=False, sheet_name='Resumen_Grupos_3_Digitos')
         df_det.to_excel(writer, index=False, sheet_name='Desglose_Subcuentas_8_Digitos')
     buf_ex.seek(0)
-
-    def construir_pdf_arz(desarrollado=False):
+        
+def construir_pdf_arz(desarrollado=False):
         b_pdf = io.BytesIO()
         doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=35, leftMargin=35, topMargin=30, bottomMargin=30)
         story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_suave = colors.HexColor("#F3F4F6")
@@ -585,6 +586,7 @@ def generar_informe_arzobispado(df_global, dict_pres):
         return b_pdf
 
     return df_res3, df_det, buf_ex, construir_pdf_arz(desarrollado=False), construir_pdf_arz(desarrollado=True)
+
 def dibujar_tabla_movimientos(df_f):
     for idx, row in df_f.iterrows():
         r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_prov = str(row.get('Proveedor', '') or '').strip(); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
