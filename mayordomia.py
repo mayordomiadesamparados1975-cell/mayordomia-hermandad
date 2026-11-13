@@ -524,7 +524,7 @@ def generar_informe_arzobispado(df_global, dict_pres):
         df_det.to_excel(writer, index=False, sheet_name='Desglose_Subcuentas_8_Digitos')
     buf_ex.seek(0)
         
-def construir_pdf_arz(desarrollado=False):
+    def construir_pdf_arz(desarrollado=False):
         b_pdf = io.BytesIO()
         doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=35, leftMargin=35, topMargin=30, bottomMargin=30)
         story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_suave = colors.HexColor("#F3F4F6")
