@@ -309,7 +309,6 @@ def generar_pdf_recibo(row):
         story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
         story.append(Paragraph(f"<b>{ej}</b>", ParagraphStyle('SubE', alignment=1, fontSize=10, textColor=burdeos)))
         
-        # Cambiamos el título según sea un ingreso o un pago a proveedor
         if row.get('Tipo') == 'Ingreso':
             sub = "JUSTIFICANTE OFICIAL DE RECAUDACIÓN"
         else:
@@ -317,14 +316,16 @@ def generar_pdf_recibo(row):
             
         story.append(Paragraph(sub, ParagraphStyle('S', alignment=1, fontSize=11, textColor=colors.gray))); story.append(Spacer(1, 15))
         
-        # Forzamos a que el importe siempre sea positivo en el papel (usando abs())
         importe_positivo = abs(float(row.get('Importe (€)', 0.0)))
+        prov_txt = str(row.get('Proveedor', '') or '').strip() or "No especificado"
+        fac_txt = str(row.get('Nº Factura', '') or '').strip() or "S/N"
         
         t_data = [
             [Paragraph(f"<b>Nº Asiento:</b> #{row.get('id')}", n_st), Paragraph(f"<b>Fecha:</b> {row.get('Fecha')}", n_st)], 
             [Paragraph(f"<b>Tipo Operación:</b> {row.get('Tipo')}", n_st), Paragraph(f"<b>Cuenta Asignada:</b> {row.get('Cuenta')}", n_st)], 
             [Paragraph(f"<b>Partida Contable:</b> {row.get('Partida')}", n_st), Paragraph(f"<b>Forma Pago:</b> {row.get('Forma Pago')}", n_st)], 
-            [Paragraph(f"<b>Detalle / Interesado:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{importe_positivo:,.2f} €</b></font>", n_st)]
+            [Paragraph(f"<b>Proveedor / Interesado:</b> {prov_txt}", n_st), Paragraph(f"<b>Nº Factura / Ticket:</b> {fac_txt}", n_st)], 
+            [Paragraph(f"<b>Concepto / Detalle:</b> {row.get('Concepto')}", n_st), Paragraph(f"<b>IMPORTE:</b> <font color='#800020'><b>{importe_positivo:,.2f} €</b></font>", n_st)]
         ]
         
         t = RLTable(t_data, colWidths=(250, 250)); t.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(t); story.append(Spacer(1, 35))
@@ -743,8 +744,8 @@ with p_fil:
             
         agrupar_conceptos = st.checkbox("📊 Agrupar informe por Conceptos / Partidas (con subtotales en PDF y hoja resumen en Excel)", value=False)
 
-    with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
-        st.caption("Introduce el número de asiento (ej: 14) para modificarlo o adjuntarle una imagen/ticket.")
+        with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
+        st.caption("Introduce el número de asiento (ej: 14) para modificar cualquier dato o adjuntarle una imagen/ticket.")
         id_a_editar = int(st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed"))
         if id_a_editar:
             df_buscado = df_global.loc[df_global['id'] == id_a_editar]
@@ -756,19 +757,27 @@ with p_fil:
                 p_t_op = obtener_partidas("Ingreso") if r_edit.get('Tipo') == "Ingreso" else obtener_partidas("Gasto")
                 idx_p_op = p_t_op.index(r_edit.get('Partida')) if r_edit.get('Partida') in p_t_op else 0
                 ed_par = c_ed1.selectbox("Partida:", p_t_op, index=idx_p_op, key=f"cef_par_{id_a_editar}")
-                ed_prov = c_ed2.text_input("Proveedor / Hermano:", value=str(r_edit.get('Proveedor', '')), key=f"cef_prov_{id_a_editar}")
+                ed_prov = c_ed1.text_input("Proveedor / Hermano:", value=str(r_edit.get('Proveedor', '')), key=f"cef_prov_{id_a_editar}")
+                
+                opciones_pago = ["Efectivo", "Tarjeta / TPV Físico", "Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"]
+                idx_pago = opciones_pago.index(r_edit.get('Forma Pago')) if r_edit.get('Forma Pago') in opciones_pago else 0
+                ed_pag = c_ed2.selectbox("Forma de Pago:", opciones_pago, index=idx_pago, key=f"cef_pag_{id_a_editar}")
+                ed_fac = c_ed2.text_input("Nº Ticket / Factura:", value=str(r_edit.get('Nº Factura', '')), key=f"cef_fac_{id_a_editar}")
                 ed_con = c_ed2.text_input("Concepto:", value=str(r_edit.get('Concepto')), key=f"cef_con_{id_a_editar}")
                 ed_imp = c_ed2.number_input("Importe (€):", value=float(r_edit.get('Importe (€)')), min_value=0.01, step=1.0, key=f"cef_imp_{id_a_editar}")
-                ed_file = c_ed2.file_uploader("📷 Añadir o Cambiar Foto del Ticket/Recibo:", type=["png", "jpg", "jpeg", "pdf"], key=f"cef_file_{id_a_editar}")
+                ed_file = st.file_uploader("📷 Añadir o Cambiar Foto del Ticket/Recibo:", type=["png", "jpg", "jpeg", "pdf"], key=f"cef_file_{id_a_editar}")
+                
                 if st.button("💾 GUARDAR CAMBIOS EN EL ASIENTO", use_container_width=True, key=f"cef_btn_save_{id_a_editar}"):
                     n_arc = r_edit.get('Comprobante') if r_edit.get('Comprobante') else ""
                     if ed_file is not None:
                         n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
                         guardar_archivo_nube(n_arc, ed_file.getbuffer())
                     conn = conectar_bd(); cur = conn.cursor()
-                    cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, proveedor=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_prov.strip(), ed_con, ed_imp, n_arc, id_a_editar))
+                    cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, proveedor=?, forma_pago=?, num_factura=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_prov.strip(), ed_pag, ed_fac.strip(), ed_con, ed_imp, n_arc, id_a_editar))
                     conn.commit(); conn.sync()
                     st.cache_data.clear()
+                    # Limpiamos el PDF cacheado de ese asiento para que se regenere con los datos corregidos
+                    st.session_state.pop(f"pdf_listo_{id_a_editar}", None)
                     st.success("¡Asiento actualizado correctamente!"); st.rerun()
             else:
                 st.caption("Introduce un número de asiento válido para ver sus datos.")
