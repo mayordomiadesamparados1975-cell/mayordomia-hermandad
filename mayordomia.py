@@ -477,10 +477,12 @@ def generar_informe_arzobispado(df_global, dict_pres):
     
     filas_detalle = list()
     filas_resumen_3 = list()
+    estructura_jerarquica = {"Gasto": list(), "Ingreso": list()}
+    totales_bloque = {"Gasto": {"p": 0.0, "r": 0.0}, "Ingreso": {"p": 0.0, "r": 0.0}}
     
     for tipo_op, lista_g3 in [("Gasto", grupos_3_gastos), ("Ingreso", grupos_3_ingresos)]:
         partidas = obtener_partidas(tipo_op)
-        subgrupos_temp = {c: {"p": 0.0, "r": 0.0} for c, _ in lista_g3}
+        subgrupos_temp = {c: {"p": 0.0, "r": 0.0, "hijos": list()} for c, _ in lista_g3}
         
         for p in partidas:
             p_str = str(p).strip()
@@ -499,28 +501,90 @@ def generar_informe_arzobispado(df_global, dict_pres):
             if cod_3 in subgrupos_temp:
                 subgrupos_temp[cod_3]["p"] += pres_v
                 subgrupos_temp[cod_3]["r"] += real_v
+                subgrupos_temp[cod_3]["hijos"].append((cod_8, nom_sub, pres_v, real_v, desv_v, pct_v))
                 
         tot_g_p, tot_g_r = 0.0, 0.0
         for c3, nom_g3 in lista_g3:
-            tp = subgrupos_temp[c3]["p"]
-            tr = subgrupos_temp[c3]["r"]
-            td = tr - tp
-            tot_g_p += tp
-            tot_g_r += tr
+            tp = subgrupos_temp[c3]["p"]; tr = subgrupos_temp[c3]["r"]; td = tr - tp
+            tot_g_p += tp; tot_g_r += tr
             tpct = f"{(tr / tp * 100):.1f}%" if tp > 0 else ("100.0%" if tr > 0 else "0.0%")
             filas_resumen_3.append({"Tipo": tipo_op.upper(), "Grupo (3 dígitos)": c3, "Nombre del Grupo Oficial": nom_g3, "Presupuesto (€)": tp, "Real (€)": tr, "Desviación (€)": td, "% Realizado": tpct})
+            estructura_jerarquica[tipo_op].append((c3, nom_g3, tp, tr, td, tpct, subgrupos_temp[c3]["hijos"]))
             
+        totales_bloque[tipo_op]["p"] = tot_g_p
+        totales_bloque[tipo_op]["r"] = tot_g_r
         filas_resumen_3.append({"Tipo": f"TOTAL {tipo_op.upper()}S", "Grupo (3 dígitos)": "---", "Nombre del Grupo Oficial": f"SUMA TOTAL {tipo_op.upper()}S", "Presupuesto (€)": tot_g_p, "Real (€)": tot_g_r, "Desviación (€)": tot_g_r - tot_g_p, "% Realizado": ""})
-
-    df_det = pd.DataFrame(filas_detalle)
+            df_det = pd.DataFrame(filas_detalle)
     df_res3 = pd.DataFrame(filas_resumen_3)
     
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+    buf_ex = io.BytesIO()
+    with pd.ExcelWriter(buf_ex, engine='openpyxl') as writer:
         df_res3.to_excel(writer, index=False, sheet_name='Resumen_Grupos_3_Digitos')
         df_det.to_excel(writer, index=False, sheet_name='Desglose_Subcuentas_8_Digitos')
-    buf.seek(0)
-    return df_res3, df_det, buf
+    buf_ex.seek(0)
+
+    def construir_pdf_arz(desarrollado=False):
+        b_pdf = io.BytesIO()
+        doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=35, leftMargin=35, topMargin=30, bottomMargin=30)
+        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_suave = colors.HexColor("#F3F4F6")
+        t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=14, leading=17, alignment=1, textColor=burdeos)
+        s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=8.5, leading=11, alignment=1, textColor=colors.gray)
+        n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=7.8, leading=10)
+        sub_st = ParagraphStyle('Sub', parent=styles['Normal'], fontSize=7.5, leading=9.5, leftIndent=10, textColor=colors.HexColor("#374151"))
+        
+        if os.path.exists("escudo.png"):
+            try: img = RLImage("escudo.png", width=55, height=55); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 4))
+            except: pass
+        mod_txt = "MODELO DESARROLLADO (3 Y 8 DÍGITOS)" if desarrollado else "MODELO AGRUPADO (GRUPOS DE 3 DÍGITOS)"
+        story.append(Paragraph("<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS</b>", t_st))
+        story.append(Paragraph(f"<b>RENDICIÓN DE CUENTAS — ARCHIDIÓCESIS DE SEVILLA ({mod_txt})</b>", ParagraphStyle('SubA', alignment=1, fontSize=9.5, textColor=burdeos)))
+        story.append(Paragraph(f"Ejercicio Contable {date.today().year} | Emitido: {datetime.now().strftime('%d/%m/%Y %H:%M')}", s_st)); story.append(Spacer(1, 10))
+        
+        t_datos = [[Paragraph("<b><font color='white'>Cuenta</font></b>", n_st), Paragraph("<b><font color='white'>Denominación Oficial</font></b>", n_st), Paragraph("<b><font color='white'>Presup.</font></b>", n_st), Paragraph("<b><font color='white'>Real</font></b>", n_st), Paragraph("<b><font color='white'>Desv.</font></b>", n_st), Paragraph("<b><font color='white'>% Real.</font></b>", n_st)]]
+        estilos_extra = list(); fila_idx = 1
+        
+        for tipo_op, titulo_bloque in [("Gasto", "GASTOS DEL EJERCICIO (GRUPO 6)"), ("Ingreso", "INGRESOS DEL EJERCICIO (GRUPO 7)")]:
+            t_datos.append([Paragraph(f"<b><font color='#800020'>{titulo_bloque}</font></b>", n_st), "", "", "", "", ""])
+            estilos_extra.append(('BACKGROUND', (0, fila_idx), (-1, fila_idx), colors.HexColor("#FDF2F2")))
+            fila_idx += 1
+            
+            for c3, nom_g3, tp, tr, td, tpct, hijos in estructura_jerarquica[tipo_op]:
+                if desarrollado:
+                    for h_cod, h_nom, hp, hr, hd, hpct in hijos:
+                        t_datos.append([Paragraph(h_cod, sub_st), Paragraph(h_nom, sub_st), Paragraph(f"{hp:,.2f} €", sub_st), Paragraph(f"{hr:,.2f} €", sub_st), Paragraph(f"{hd:,.2f} €", sub_st), Paragraph(hpct, sub_st)])
+                        fila_idx += 1
+                    t_datos.append([Paragraph(f"<b>{c3}</b>", n_st), Paragraph(f"<b>Total {nom_g3}</b>", n_st), Paragraph(f"<b>{tp:,.2f} €</b>", n_st), Paragraph(f"<b>{tr:,.2f} €</b>", n_st), Paragraph(f"<b>{td:,.2f} €</b>", n_st), Paragraph(f"<b>{tpct}</b>", n_st)])
+                    estilos_extra.append(('BACKGROUND', (0, fila_idx), (-1, fila_idx), gris_suave))
+                    fila_idx += 1
+                else:
+                    t_datos.append([Paragraph(f"<b>{c3}</b>", n_st), Paragraph(nom_g3, n_st), Paragraph(f"{tp:,.2f} €", n_st), Paragraph(f"{tr:,.2f} €", n_st), Paragraph(f"{td:,.2f} €", n_st), Paragraph(tpct, n_st)])
+                    fila_idx += 1
+                    
+            bp = totales_bloque[tipo_op]["p"]; br = totales_bloque[tipo_op]["r"]; bd = br - bp
+            bpct = f"{(br / bp * 100):.1f}%" if bp > 0 else ("100.0%" if br > 0 else "0.0%")
+            t_datos.append([Paragraph("---", n_st), Paragraph(f"<b>TOTAL {tipo_op.upper()}S</b>", n_st), Paragraph(f"<b>{bp:,.2f} €</b>", n_st), Paragraph(f"<b>{br:,.2f} €</b>", n_st), Paragraph(f"<b>{bd:,.2f} €</b>", n_st), Paragraph(f"<b>{bpct}</b>", n_st)])
+            estilos_extra.append(('LINEABOVE', (0, fila_idx), (-1, fila_idx), 1.2, burdeos))
+            estilos_extra.append(('LINEBELOW', (0, fila_idx), (-1, fila_idx), 1.2, burdeos))
+            fila_idx += 1
+            
+        res_p = totales_bloque["Ingreso"]["p"] - totales_bloque["Gasto"]["p"]
+        res_r = totales_bloque["Ingreso"]["r"] - totales_bloque["Gasto"]["r"]
+        res_d = res_r - res_p
+        t_datos.append([Paragraph("<b>RES.</b>", n_st), Paragraph("<b>RESULTADO (INGRESOS - GASTOS)</b>", n_st), Paragraph(f"<b>{res_p:,.2f} €</b>", n_st), Paragraph(f"<b>{res_r:,.2f} €</b>", n_st), Paragraph(f"<b>{res_d:,.2f} €</b>", n_st), Paragraph("", n_st)])
+        estilos_extra.append(('BACKGROUND', (0, fila_idx), (-1, fila_idx), colors.HexColor("#FDF2F2")))
+        
+        t = RLTable(t_datos, colWidths=(68, 224, 65, 65, 65, 45))
+        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 3.5), ('GRID', (0,0), (-1,-1), 0.4, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')] + estilos_extra))
+        story.append(t); story.append(Spacer(1, 30))
+        
+        tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8.5)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8.5)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8.5))]], colWidths=(177, 177, 177))
+        tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
+        story.append(tf)
+        doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical)
+        b_pdf.seek(0)
+        return b_pdf
+
+    return df_res3, df_det, buf_ex, construir_pdf_arz(desarrollado=False), construir_pdf_arz(desarrollado=True)
 def dibujar_tabla_movimientos(df_f):
     for idx, row in df_f.iterrows():
         r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_prov = str(row.get('Proveedor', '') or '').strip(); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
@@ -948,13 +1012,19 @@ with p_pre:
             st.markdown("---")
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
         st.markdown("---")
-        with st.expander("⛪ Informe Oficial Archidiócesis de Sevilla (Grupos 3 dígitos y Subcuentas 8 dígitos)", expanded=False):
-            df_r3, df_d8, excel_arz = generar_informe_arzobispado(df_global, dict_pres)
+               with st.expander("⛪ Informe Oficial Archidiócesis de Sevilla (Grupos 3 dígitos y Subcuentas 8 dígitos)", expanded=False):
+            df_r3, df_d8, excel_arz, pdf_arz_agrupado, pdf_arz_desarrollado = generar_informe_arzobispado(df_global, dict_pres)
+            cp_arz1, cp_arz2, cp_arz3 = st.columns(3)
+            with cp_arz1:
+                st.download_button(label="📄 PDF Agrupado (3 dígitos)", data=pdf_arz_agrupado, file_name=f"Arzobispado_Agrupado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
+            with cp_arz2:
+                st.download_button(label="📑 PDF Desarrollado (3 y 8 dígitos)", data=pdf_arz_desarrollado, file_name=f"Arzobispado_Desarrollado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
+            with cp_arz3:
+                st.download_button(label="📊 Excel Oficial (3 y 8 dígitos)", data=excel_arz, file_name=f"Cuentas_Archidiocesis_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
             st.markdown("**1. Resumen Oficial Agrupado por Bloques de 3 Dígitos:**")
             st.dataframe(df_r3, use_container_width=True, hide_index=True)
             st.markdown("**2. Desglose Específico por Subcuentas de 8 Dígitos:**")
             st.dataframe(df_d8, use_container_width=True, hide_index=True)
-            st.download_button(label="📥 DESCARGAR EXCEL OFICIAL ARCHIDIÓCESIS (3 Y 8 DÍGITOS)", data=excel_arz, file_name=f"Cuentas_Archidiocesis_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
