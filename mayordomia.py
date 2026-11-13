@@ -100,10 +100,12 @@ def conectar_bd():
     conn = TursoConn()
     if "bd_inicializada" not in st.session_state:
         cursor = conn.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0, pendiente INTEGER DEFAULT 0)")
+                cursor.execute("CREATE TABLE IF NOT EXISTS contabilidad (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, tipo TEXT NOT NULL, origen_destino TEXT NOT NULL, partida TEXT NOT NULL, proveedor TEXT DEFAULT '', concepto TEXT NOT NULL, forma_pago TEXT NOT NULL, importe REAL NOT NULL, comprobante TEXT, eliminado INTEGER DEFAULT 0, pendiente INTEGER DEFAULT 0)")
         try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN eliminado INTEGER DEFAULT 0")
         except: pass
         try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN pendiente INTEGER DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE contabilidad ADD COLUMN proveedor TEXT DEFAULT ''")
         except: pass
         cursor.execute("CREATE TABLE IF NOT EXISTS traspasos_internos (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL, origen TEXT NOT NULL, destino TEXT NOT NULL, importe REAL NOT NULL, concepto TEXT NOT NULL)")
         cursor.execute("CREATE TABLE IF NOT EXISTS partidas_personalizadas (id INTEGER PRIMARY KEY AUTOINCREMENT, tipo TEXT NOT NULL, nombre TEXT NOT NULL UNIQUE)")
@@ -450,23 +452,15 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 def dibujar_tabla_movimientos(df_f):
     for idx, row in df_f.iterrows():
-        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
-        
-        # Consultamos en Turso de forma fluida el estado pendiente del asiento
-        es_pend = 0
-        try:
-            _, rows_p = ejecutar_turso_http(f"SELECT COALESCE(pendiente, 0) FROM contabilidad WHERE id = {r_id}")
-            if rows_p: es_pend = int(itemgetter(0)(rows_p)[0])
-        except: pass
+        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_prov = str(row.get('Proveedor', '') or '').strip(); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+        es_pend = int(row.get('Pendiente', 0)) if pd.notna(row.get('Pendiente')) else 0
 
         with st.container(border=True):
             ca, cb, cc, cd = st.columns((0.6, 4.4, 1.5, 2.5))
             ca.markdown(f"**#{r_id}**")
-            
-            # Etiqueta visual burdeos/amarilla si el movimiento está congelado como pendiente
             txt_p = " <span style='color:#d97706; font-weight:bold; font-size:11px; background:#fef3c7; padding:2px 6px; border-radius:3px;'>⏳ PENDIENTE</span>" if es_pend == 1 else ""
-            cb.markdown(f"**{r_par}** - {r_con}{txt_p}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
-            
+            txt_prov = f" <span style='color:#800020; font-weight:bold;'>[{r_prov}]</span>" if r_prov else ""
+            cb.markdown(f"**{r_par}**{txt_prov} - {r_con}{txt_p}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
             c_val = "green" if r_tipo == 'Ingreso' else "red"
             cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
             
@@ -477,9 +471,9 @@ def dibujar_tabla_movimientos(df_f):
                 cd.download_button(label="⬇️ Descargar PDF Listo", data=st.session_state[f"pdf_listo_{r_id}"], file_name=f"Justificante_{r_id}.pdf", mime="application/pdf", key=f"dl_pdf_{r_id}", use_container_width=True)
             
             if es_pend == 1:
-                # El botón dinámico permite asentar el movimiento en el saldo definitivo
                 if cd.button("🟢 Marcar como Pagado/Cobrado", key=f"liq_{r_id}", use_container_width=True):
                     ejecutar_turso_http(f"UPDATE contabilidad SET pendiente = 0 WHERE id = {r_id}")
+                    st.cache_data.clear()
                     st.rerun()
             elif r_com:
                 if cd.button("📷 Cargar Ticket", key=f"prep_img_{r_id}", use_container_width=True):
@@ -489,6 +483,7 @@ def dibujar_tabla_movimientos(df_f):
             
             if cd.button("❌ Eliminar Asiento", key=f"del_{r_id}", use_container_width=True):
                 borrar_registro(r_id)
+                st.cache_data.clear()
                 st.rerun()
 def dibujar_tabla_traspasos(df_t):
     if df_t.empty:
@@ -533,7 +528,7 @@ def dibujar_tabla_traspasos(df_t):
         else:
             st.caption("No existe ningún traspaso con ese número.")
 conn = conectar_bd()
-df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
+df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', COALESCE(proveedor, '') as 'Proveedor', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
 if s_ini:
     caja_ini, banco_ini = s_ini
@@ -610,6 +605,7 @@ if modo_movil:
     m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
     m_partida = st.selectbox("Concepto / Partida:", obtener_partidas(m_tipo), key="m_part")
     m_pago = st.selectbox("Forma de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if m_cuenta == "Caja" else ["Transferencia Bancaria", "Domiciliación Bancaria", "Cargo / Comisión Bancaria"], key="m_pago")
+        m_proveedor = st.text_input("Proveedor / Hermano (Opcional):", placeholder="Ej: Cerería Bellido / Manuel García", key="m_prov")
     m_concepto = st.text_input("Detalle (¿Qué o quién?):", placeholder="Ej: Compra de cera / Limosna", key="m_con")
     m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
     m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
@@ -628,8 +624,9 @@ if modo_movil:
                     n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
                     guardar_archivo_nube(n_arc, m_foto.getbuffer())
                 conn = conectar_bd(); cur = conn.cursor()
-                cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0)", (datetime.now().strftime("%Y-%m-%d %H:%M"), m_tipo, m_cuenta, m_partida, m_concepto.strip(), m_pago, m_importe, n_arc))
+                cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)", (datetime.now().strftime("%Y-%m-%d %H:%M"), m_tipo, m_cuenta, m_partida, m_proveedor.strip(), m_concepto.strip(), m_pago, m_importe, n_arc))
                 conn.commit(); conn.sync()
+                st.cache_data.clear()
                 st.success("¡Apunte registrado en la nube!"); st.rerun()
     st.markdown("---")
     st.markdown("##### 🕒 Últimos 5 movimientos")
@@ -654,14 +651,17 @@ st.markdown("---")
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
 with p_reg:
-    c_r1, c_r2 = st.columns(2)
+        c_r1, c_r2 = st.columns(2)
     with c_r1:
         tipo = st.radio("Tipo de Apunte:", ["Ingreso", "Gasto"], horizontal=True)
         cuenta = st.radio("Destino / Origen del dinero:", ["Caja", "Banco"], horizontal=True)
         partida = st.selectbox("Concepto General o Partida:", obtener_partidas(tipo))
+        provs_existentes = sorted([p for p in df_global['Proveedor'].dropna().unique() if str(p).strip() != ""]) if not df_global.empty else []
+        prov_sel = st.selectbox("Seleccionar Proveedor / Hermano frecuente (o escribir nuevo abajo):", ["(Escribir nuevo)"] + provs_existentes)
     with c_r2:
         forma_pago = st.selectbox("Forma o Canal de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if cuenta == "Caja" else ["Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
-        concepto = st.text_input("Detalle específico o datos del Hermano/Beneficiario:", placeholder="Ej: Recibí de Manuel García para cuota anual")
+        proveedor_nuevo = st.text_input("Nombre del Proveedor / Hermano:", value="" if prov_sel == "(Escribir nuevo)" else prov_sel, placeholder="Ej: Cerería Bellido / Banda de Música")
+        concepto = st.text_input("Detalle específico o Nº Factura:", placeholder="Ej: Factura 2026/45 - Cirios Altar")
         importe = st.number_input("Importe del apunte (€):", min_value=0.01, step=5.0, format="%.2f")
         es_pendiente = st.checkbox("⏳ Marcar como OPERACIÓN PENDIENTE (No altera el saldo de caja/banco todavía)", value=False)
     
@@ -681,8 +681,9 @@ with p_reg:
                     n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
                     guardar_archivo_nube(n_arc, up_file.getbuffer())
                 conn = conectar_bd(); cursor = conn.cursor()
-                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, concepto, forma_pago, importe, n_arc, 1 if es_pendiente else 0))
+                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, proveedor_nuevo.strip(), concepto, forma_pago, importe, n_arc, 1 if es_pendiente else 0))
                 conn.commit(); conn.sync()
+                st.cache_data.clear()
                 st.success("Asiento grabado en la nube."); st.rerun()
     st.markdown("---")
     with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
@@ -723,36 +724,44 @@ with p_fil:
         with cf3:
             try: r_fechas = st.date_input("Rango Fechas:", value=(date.today().replace(month=1, day=1), date.today()))
             except: r_fechas = date.today()
-        with cf4: f_texto = st.text_input("Buscar Concepto:", placeholder="Ej: Lotería, cuota...")
+        with cf4: f_texto = st.text_input("Buscar Texto libre:", placeholder="Ej: Factura, Lotería...")
         
-        partidas_disponibles = sorted(list(df_global['Partida'].dropna().unique())) if not df_global.empty else []
-        f_partidas = st.multiselect("Filtrar por Partidas / Conceptos específicos (vacío = todas):", partidas_disponibles, default=[])
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            partidas_disponibles = sorted(list(df_global['Partida'].dropna().unique())) if not df_global.empty else []
+            f_partidas = st.multiselect("Filtrar por Partidas / Conceptos específicos (vacío = todas):", partidas_disponibles, default=[])
+        with col_f2:
+            proveedores_disp = sorted([p for p in df_global['Proveedor'].dropna().unique() if str(p).strip() != ""]) if not df_global.empty else []
+            f_proveedor = st.selectbox("Filtrar por Proveedor / Hermano:", ["Todos"] + proveedores_disp)
+            
         agrupar_conceptos = st.checkbox("📊 Agrupar informe por Conceptos / Partidas (con subtotales en PDF y hoja resumen en Excel)", value=False)
 
     with st.expander("✏️ PANEL CENTRAL DE EDICIÓN (Modificar Asientos o Añadir Fotos)", expanded=False):
         st.caption("Introduce el número de asiento (ej: 14) para modificarlo o adjuntarle una imagen/ticket.")
-        id_a_editar = st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed")
+        id_a_editar = int(st.number_input("Número de Asiento (#) a modificar:", min_value=1, step=1, key="id_central_ed"))
         if id_a_editar:
             df_buscado = df_global.loc[df_global['id'] == id_a_editar]
             if not df_buscado.empty:
                 r_edit = df_buscado.iloc[0]
                 c_ed1, c_ed2 = st.columns(2)
-                ed_fec = c_ed1.text_input("Fecha:", value=str(r_edit.get('Fecha')), key="cef_fec")
-                ed_cue = c_ed1.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_edit.get('Cuenta')=="Caja" else 1, key="cef_cue")
+                ed_fec = c_ed1.text_input("Fecha:", value=str(r_edit.get('Fecha')), key=f"cef_fec_{id_a_editar}")
+                ed_cue = c_ed1.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_edit.get('Cuenta')=="Caja" else 1, key=f"cef_cue_{id_a_editar}")
                 p_t_op = obtener_partidas("Ingreso") if r_edit.get('Tipo') == "Ingreso" else obtener_partidas("Gasto")
                 idx_p_op = p_t_op.index(r_edit.get('Partida')) if r_edit.get('Partida') in p_t_op else 0
-                ed_par = c_ed1.selectbox("Partida:", p_t_op, index=idx_p_op, key="cef_par")
-                ed_con = c_ed2.text_input("Concepto:", value=str(r_edit.get('Concepto')), key="cef_con")
-                ed_imp = c_ed2.number_input("Importe (€):", value=float(r_edit.get('Importe (€)')), min_value=0.01, step=1.0, key="cef_imp")
-                ed_file = c_ed2.file_uploader("📷 Añadir o Cambiar Foto del Ticket/Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="cef_file")
-                if st.button("💾 GUARDAR CAMBIOS EN EL ASIENTO", use_container_width=True, key="cef_btn_save"):
+                ed_par = c_ed1.selectbox("Partida:", p_t_op, index=idx_p_op, key=f"cef_par_{id_a_editar}")
+                ed_prov = c_ed2.text_input("Proveedor / Hermano:", value=str(r_edit.get('Proveedor', '')), key=f"cef_prov_{id_a_editar}")
+                ed_con = c_ed2.text_input("Concepto:", value=str(r_edit.get('Concepto')), key=f"cef_con_{id_a_editar}")
+                ed_imp = c_ed2.number_input("Importe (€):", value=float(r_edit.get('Importe (€)')), min_value=0.01, step=1.0, key=f"cef_imp_{id_a_editar}")
+                ed_file = c_ed2.file_uploader("📷 Añadir o Cambiar Foto del Ticket/Recibo:", type=["png", "jpg", "jpeg", "pdf"], key=f"cef_file_{id_a_editar}")
+                if st.button("💾 GUARDAR CAMBIOS EN EL ASIENTO", use_container_width=True, key=f"cef_btn_save_{id_a_editar}"):
                     n_arc = r_edit.get('Comprobante') if r_edit.get('Comprobante') else ""
                     if ed_file is not None:
                         n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{ed_file.name}"
                         guardar_archivo_nube(n_arc, ed_file.getbuffer())
                     conn = conectar_bd(); cur = conn.cursor()
-                    cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_con, ed_imp, n_arc, id_a_editar))
+                    cur.execute("UPDATE contabilidad SET fecha=?, origen_destino=?, partida=?, proveedor=?, concepto=?, importe=?, comprobante=? WHERE id=?", (ed_fec, ed_cue, ed_par, ed_prov.strip(), ed_con, ed_imp, n_arc, id_a_editar))
                     conn.commit(); conn.sync()
+                    st.cache_data.clear()
                     st.success("¡Asiento actualizado correctamente!"); st.rerun()
             else:
                 st.caption("Introduce un número de asiento válido para ver sus datos.")
@@ -762,7 +771,8 @@ with p_fil:
     if f_tipo != "Todos": df_f = df_f.loc[df_f['Tipo'] == f_tipo]
     if f_pago != "Todas": df_f = df_f.loc[df_f['Forma Pago'] == f_pago]
     if f_partidas: df_f = df_f.loc[df_f['Partida'].isin(f_partidas)]
-    if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False)]
+    if f_proveedor != "Todos": df_f = df_f.loc[df_f['Proveedor'] == f_proveedor]
+    if f_texto: df_f = df_f.loc[df_f['Concepto'].str.contains(f_texto, case=False) | df_f['Partida'].str.contains(f_texto, case=False) | df_f['Proveedor'].str.contains(f_texto, case=False)]
     if isinstance(r_fechas, tuple) and len(r_fechas) == 2:
         f_ini_d, f_fin_d = r_fechas
         df_f = df_f.loc[(df_f['Fecha'] >= f_ini_d.strftime("%Y-%m-%d")) & (df_f['Fecha'] <= (f_fin_d.strftime("%Y-%m-%d") + " 23:59"))]
