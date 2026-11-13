@@ -1014,7 +1014,7 @@ with p_pre:
             st.markdown("---")
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
         st.markdown("---")
-               with st.expander("⛪ Informe Oficial Archidiócesis de Sevilla (Grupos 3 dígitos y Subcuentas 8 dígitos)", expanded=False):
+        with st.expander("⛪ Informe Oficial Archidiócesis de Sevilla (Grupos 3 dígitos y Subcuentas 8 dígitos)", expanded=False):
             df_r3, df_d8, excel_arz, pdf_arz_agrupado, pdf_arz_desarrollado = generar_informe_arzobispado(df_global, dict_pres)
             cp_arz1, cp_arz2, cp_arz3 = st.columns(3)
             with cp_arz1:
@@ -1027,6 +1027,7 @@ with p_pre:
             st.dataframe(df_r3, use_container_width=True, hide_index=True)
             st.markdown("**2. Desglose Específico por Subcuentas de 8 Dígitos:**")
             st.dataframe(df_d8, use_container_width=True, hide_index=True)
+
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
