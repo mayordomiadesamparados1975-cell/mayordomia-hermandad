@@ -453,6 +453,60 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tr = RLTable(t_res, colWidths=(230, 100, 100, 100)); tr.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 5), ('GRID', (0,0), (-1,-1), 0.6, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')])); story.append(tr); story.append(Spacer(1, 25))
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
+def generar_informe_arzobispado(df_global, dict_pres):
+    grupos_3 = {
+        "600": "Compras de mercaderias", "601": "Compra de loteria", "621": "Arrendamientos y canones",
+        "622": "Reparaciones y conservacion", "623": "Servicios de profesionales independientes",
+        "624": "Transportes", "625": "Primas de seguros", "626": "Servicios bancarios y similares",
+        "627": "Publicaciones, publicidad y propaganda", "628": "Suministros", "629": "Otros servicios",
+        "631": "Otros tributos", "640": "Sueldos y salarios", "642": "Seguridad Social a cargo de la entidad",
+        "650": "Ayudas monetarias (obra social)", "651": "Ayudas no monetarias",
+        "653": "Colaboraciones y donativos entregados", "659": "Otras perdidas en gestion corriente",
+        "662": "Intereses de deudas", "669": "Otros gastos financieros", "678": "Gastos excepcionales",
+        "681": "Amortizacion del inmovilizado material",
+        "700": "Venta de articulos de hermandad", "705": "Prestacion de servicios",
+        "720": "Cuotas de hermanos", "721": "Cuotas extraordinarias",
+        "722": "Promociones para captacion de recursos", "723": "Ingresos de patrocinadores y colaboraciones",
+        "728": "Donativos y limosnas", "740": "Subvenciones oficiales a la actividad",
+        "746": "Donaciones y legados a la actividad", "752": "Ingresos por arrendamientos",
+        "759": "Ingresos por servicios diversos", "769": "Otros ingresos financieros",
+        "778": "Ingresos excepcionales"
+    }
+    filas_detalle = list()
+    filas_resumen_3 = list()
+    
+    for tipo_op in ["Gasto", "Ingreso"]:
+        partidas = obtener_partidas(tipo_op)
+        subgrupos_temp = dict()
+        for p in partidas:
+            cod_8 = p.split(" - ") if " - " in p else p[:8]
+            nom_sub = p.split(" - ") if " - " in p else p
+            cod_3 = cod_8[:3]
+            pres_v = float(dict_pres.get(p, 0.0))
+            real_v = float(df_global.loc[(df_global['Tipo'] == tipo_op) & (df_global['Partida'] == p), 'Importe (€)'].sum()) if not df_global.empty else 0.0
+            desv_v = real_v - pres_v
+            pct_v = f"{(real_v / pres_v * 100):.1f}%" if pres_v > 0 else ("100.0%" if real_v > 0 else "0.0%")
+            filas_detalle.append({"Tipo": tipo_op.upper(), "Cuenta": cod_8, "Nombre": nom_sub, "Presupuesto (€)": pres_v, "Real (€)": real_v, "Desviación (€)": desv_v, "% Realizado": pct_v})
+            
+            if cod_3 not in subgrupos_temp:
+                subgrupos_temp[cod_3] = {"p": 0.0, "r": 0.0}
+            subgrupos_temp[cod_3]["p"] += pres_v
+            subgrupos_temp[cod_3]["r"] += real_v
+            
+        for c3 in sorted(subgrupos_temp.keys()):
+            tp = subgrupos_temp[c3]["p"]; tr = subgrupos_temp[c3]["r"]; td = tr - tp
+            tpct = f"{(tr / tp * 100):.1f}%" if tp > 0 else ("100.0%" if tr > 0 else "0.0%")
+            filas_resumen_3.append({"Tipo": tipo_op.upper(), "Grupo (3 dígitos)": c3, "Nombre del Grupo Oficial": grupos_3.get(c3, "Otros conceptos"), "Presupuesto (€)": tp, "Real (€)": tr, "Desviación (€)": td, "% Realizado": tpct})
+            
+    df_det = pd.DataFrame(filas_detalle)
+    df_res3 = pd.DataFrame(filas_resumen_3)
+    
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        df_res3.to_excel(writer, index=False, sheet_name='Resumen_Grupos_3_Digitos')
+        df_det.to_excel(writer, index=False, sheet_name='Desglose_Subcuentas_8_Digitos')
+    buf.seek(0)
+    return df_res3, df_det, buf
 def dibujar_tabla_movimientos(df_f):
     for idx, row in df_f.iterrows():
         r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_prov = str(row.get('Proveedor', '') or '').strip(); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
@@ -870,7 +924,14 @@ with p_pre:
                 st.bar_chart(df_comp.set_index("Partida")[["Presupuestado (€)", "Ejecutado (€)"]])
             st.markdown("---")
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
-
+                    st.markdown("---")
+        with st.expander("⛪ Informe Oficial Archidiócesis de Sevilla (Grupos 3 dígitos y Subcuentas 8 dígitos)", expanded=False):
+            df_r3, df_d8, excel_arz = generar_informe_arzobispado(df_global, dict_pres)
+            st.markdown("**1. Resumen Oficial Agrupado por Bloques de 3 Dígitos:**")
+            st.dataframe(df_r3, use_container_width=True, hide_index=True)
+            st.markdown("**2. Desglose Específico por Subcuentas de 8 Dígitos:**")
+            st.dataframe(df_d8, use_container_width=True, hide_index=True)
+            st.download_button(label="📥 DESCARGAR EXCEL OFICIAL ARCHIDIÓCESIS (3 Y 8 DÍGITOS)", data=excel_arz, file_name=f"Cuentas_Archidiocesis_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 with p_con:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
@@ -882,6 +943,82 @@ with p_con:
         mostrar_panel_respaldos(df_global)
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
+                with st.expander("⛪ Cargar Plan Contable Oficial Arzobispado de Sevilla (8 dígitos)", expanded=False):
+            st.caption("Carga todas las subcuentas oficiales de 8 dígitos del Arzobispado de Sevilla para cuadrar con los grupos de 3 dígitos.")
+            if st.button("📥 Cargar Catálogo Oficial Arzobispado", use_container_width=True, key="btn_plan_sevilla"):
+                plan_arzobispado = [
+                    # GASTOS (Grupo 6)
+                    ("Gasto", "60000000 - Compras de mercaderias"),
+                    ("Gasto", "60100000 - Compra de loteria"),
+                    ("Gasto", "62100000 - Arrendamientos y canones"),
+                    ("Gasto", "62200000 - Reparaciones y conservacion"),
+                    ("Gasto", "62300000 - Servicios de profesionales independientes"),
+                    ("Gasto", "62400000 - Transportes"),
+                    ("Gasto", "62500000 - Primas de seguros"),
+                    ("Gasto", "62600000 - Servicios bancarios y similares"),
+                    ("Gasto", "62700000 - Boletin de la hermandad"),
+                    ("Gasto", "62700001 - Carteles y convocatorias"),
+                    ("Gasto", "62800000 - Casa de hermandad: luz"),
+                    ("Gasto", "62800001 - Casa de hermandad: agua"),
+                    ("Gasto", "62800002 - Casa de hermandad: telefono e internet"),
+                    ("Gasto", "62900000 - Culto: cera"),
+                    ("Gasto", "62900001 - Culto: flores y exorno"),
+                    ("Gasto", "62900002 - Culto: musica y capillas"),
+                    ("Gasto", "62900003 - Culto: predicadores y celebraciones"),
+                    ("Gasto", "62900004 - Culto: imprenta y estampas"),
+                    ("Gasto", "62900005 - Culto: otros gastos"),
+                    ("Gasto", "62900010 - Estacion de penitencia: costaleros"),
+                    ("Gasto", "62900011 - Estacion de penitencia: bandas"),
+                    ("Gasto", "62900012 - Estacion de penitencia: montaje de pasos"),
+                    ("Gasto", "62900013 - Estacion de penitencia: seguros y permisos"),
+                    ("Gasto", "62900014 - Estacion de penitencia: otros gastos"),
+                    ("Gasto", "62900020 - Formacion"),
+                    ("Gasto", "62900021 - Juventud"),
+                    ("Gasto", "62900022 - Convivencias y actos sociales"),
+                    ("Gasto", "62900023 - Grupo joven y monaguillos"),
+                    ("Gasto", "62900030 - Material de oficina"),
+                    ("Gasto", "62900031 - Programa de gestion y web"),
+                    ("Gasto", "62900032 - Limpieza"),
+                    ("Gasto", "63100000 - Otros tributos"),
+                    ("Gasto", "64000000 - Sueldos y salarios"),
+                    ("Gasto", "64200000 - Seguridad Social a cargo de la entidad"),
+                    ("Gasto", "65000000 - Bolsa de caridad"),
+                    ("Gasto", "65000001 - Economato y ayudas a familias"),
+                    ("Gasto", "65000002 - Aportacion a Caritas y otras entidades"),
+                    ("Gasto", "65100000 - Ayudas no monetarias"),
+                    ("Gasto", "65300000 - Colaboraciones y donativos entregados"),
+                    ("Gasto", "65900000 - Otras perdidas en gestion corriente"),
+                    ("Gasto", "66200000 - Intereses de deudas"),
+                    ("Gasto", "66900000 - Otros gastos financieros"),
+                    ("Gasto", "67800000 - Gastos excepcionales"),
+                    ("Gasto", "68100000 - Amortizacion del inmovilizado material"),
+                    # INGRESOS (Grupo 7)
+                    ("Ingreso", "70000000 - Venta de articulos de hermandad"),
+                    ("Ingreso", "70500000 - Prestacion de servicios"),
+                    ("Ingreso", "72000000 - Cuotas de hermanos"),
+                    ("Ingreso", "72000001 - Cuotas de altas"),
+                    ("Ingreso", "72000002 - Papeletas de sitio"),
+                    ("Ingreso", "72100000 - Cuotas extraordinarias"),
+                    ("Ingreso", "72200000 - Loteria de Navidad"),
+                    ("Ingreso", "72200001 - Rifas y sorteos"),
+                    ("Ingreso", "72200002 - Barra y convivencias"),
+                    ("Ingreso", "72300000 - Ingresos de patrocinadores y colaboraciones"),
+                    ("Ingreso", "72800000 - Limosnas y cepillos"),
+                    ("Ingreso", "72800001 - Donativos de hermanos"),
+                    ("Ingreso", "72800002 - Donativos para caridad"),
+                    ("Ingreso", "74000000 - Subvenciones oficiales a la actividad"),
+                    ("Ingreso", "74600000 - Donaciones y legados a la actividad"),
+                    ("Ingreso", "75200000 - Ingresos por arrendamientos"),
+                    ("Ingreso", "75900000 - Ingresos por servicios diversos"),
+                    ("Ingreso", "76900000 - Otros ingresos financieros"),
+                    ("Ingreso", "77800000 - Ingresos excepcionales")
+                ]
+                conn = conectar_bd(); cur = conn.cursor()
+                for t_s, n_s in plan_arzobispado:
+                    cur.execute("INSERT OR IGNORE INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (t_s, n_s))
+                conn.commit(); conn.sync()
+                st.cache_data.clear()
+                st.success("Catálogo oficial de 8 dígitos del Arzobispado cargado."); st.rerun()
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
         c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: Lotería de Navidad")
         if st.button("Guardar Nueva Partida", use_container_width=True):
