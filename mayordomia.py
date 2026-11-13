@@ -654,7 +654,7 @@ st.markdown("---")
 p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
 with p_reg:
-        c_r1, c_r2 = st.columns(2)
+    c_r1, c_r2 = st.columns(2)
     with c_r1:
         tipo = st.radio("Tipo de Apunte:", ["Ingreso", "Gasto"], horizontal=True)
         cuenta = st.radio("Destino / Origen del dinero:", ["Caja", "Banco"], horizontal=True)
@@ -664,19 +664,21 @@ with p_reg:
     with c_r2:
         forma_pago = st.selectbox("Forma o Canal de Pago:", ["Efectivo", "Tarjeta / TPV Físico"] if cuenta == "Caja" else ["Domiciliación Bancaria", "Transferencia Bancaria", "Cargo / Comisión Bancaria"])
         proveedor_nuevo = st.text_input("Nombre del Proveedor / Hermano:", value="" if prov_sel == "(Escribir nuevo)" else prov_sel, placeholder="Ej: Cerería Bellido / Banda de Música")
-        concepto = st.text_input("Detalle específico o Nº Factura:", placeholder="Ej: Factura 2026/45 - Cirios Altar")
+        num_factura = st.text_input("Nº de Ticket / Factura (Opcional):", placeholder="Ej: FAC-2026/089")
+        concepto = st.text_input("Detalle específico:", placeholder="Ej: Compra de cirios para Altar de Cultos")
         importe = st.number_input("Importe del apunte (€):", min_value=0.01, step=5.0, format="%.2f")
         es_pendiente = st.checkbox("⏳ Marcar como OPERACIÓN PENDIENTE (No altera el saldo de caja/banco todavía)", value=False)
-    
+
     up_file = st.file_uploader("📷 Adjuntar foto del Ticket o Recibo (Opcional):", type=["png", "jpg", "jpeg", "pdf"])
-    
+
     bloqueo_msg = comprobar_bloqueo_concurrencia(quien_opera)
     if bloqueo_msg:
         st.warning(bloqueo_msg)
         st.button("🔒 GUARDADO DESACTIVADO TEMPORALMENTE", disabled=True, use_container_width=True)
     else:
         if st.button("Asentar Asiento Contable", use_container_width=True):
-            if not concepto.strip(): st.error("Por favor, añada una descripción o detalle antes de guardar.")
+            if not concepto.strip():
+                st.error("Por favor, añada una descripción o detalle antes de guardar.")
             else:
                 registrar_presencia_usuario(quien_opera, "Registro Manual")
                 n_arc = ""
@@ -684,10 +686,11 @@ with p_reg:
                     n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{up_file.name}"
                     guardar_archivo_nube(n_arc, up_file.getbuffer())
                 conn = conectar_bd(); cursor = conn.cursor()
-                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, proveedor_nuevo.strip(), concepto, forma_pago, importe, n_arc, 1 if es_pendiente else 0))
+                cursor.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, num_factura, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), tipo, cuenta, partida, proveedor_nuevo.strip(), num_factura.strip(), concepto, forma_pago, importe, n_arc, 1 if es_pendiente else 0))
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("Asiento grabado en la nube."); st.rerun()
+
     st.markdown("---")
     with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
         st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
@@ -698,7 +701,7 @@ with p_reg:
         archivo_excel = st.file_uploader("Seleccionar archivo Excel de remesa bancaria:", type=["xlsx", "xls"], key="up_remesa_banco")
         if archivo_excel is not None:
             procesar_panel_remesas(archivo_excel)
-            
+
     st.markdown("---")
     with st.expander("🔄 Registrar Traspaso Interno de Fondos (Mover dinero de Caja a Banco o viceversa)", expanded=False):
         st.caption("Esta acción traspasa dinero real entre tus cuentas de tesorería, manteniendo los informes del Cabildo limpios de falsos ingresos o gastos.")
@@ -707,7 +710,7 @@ with p_reg:
         st.markdown(f"➡️ **Cuenta de DESTINO (A dónde entra el dinero):** `{t_destino}`")
         t_importe = st.number_input("Cantidad a traspasar (€):", min_value=0.01, step=10.0, format="%.2f", key="t_imp")
         t_concepto = st.text_input("Motivo o nota del traspaso:", value="Traspaso interno de fondos para necesidades de caja", key="t_con")
-        
+
         bloqueo_traspaso = comprobar_bloqueo_concurrencia(quien_opera)
         if bloqueo_traspaso:
             st.warning(bloqueo_traspaso)
@@ -718,6 +721,7 @@ with p_reg:
                 conn = conectar_bd(); cur = conn.cursor()
                 cur.execute("INSERT INTO traspasos_internos (fecha, origen, destino, importe, concepto) VALUES (?, ?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d %H:%M"), t_origen, t_destino, t_importe, t_concepto.strip()))
                 conn.commit(); conn.sync()
+                st.cache_data.clear()
                 st.success("¡Traspaso interno asentado en las cuentas!"); st.rerun()
 with p_fil:
     with st.container(border=True):
