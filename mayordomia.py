@@ -454,52 +454,64 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 def generar_informe_arzobispado(df_global, dict_pres):
-    grupos_3 = {
-        "600": "Compras de mercaderias", "601": "Compra de loteria", "621": "Arrendamientos y canones",
-        "622": "Reparaciones y conservacion", "623": "Servicios de profesionales independientes",
-        "624": "Transportes", "625": "Primas de seguros", "626": "Servicios bancarios y similares",
-        "627": "Publicaciones, publicidad y propaganda", "628": "Suministros", "629": "Otros servicios",
-        "631": "Otros tributos", "640": "Sueldos y salarios", "642": "Seguridad Social a cargo de la entidad",
-        "650": "Ayudas monetarias (obra social)", "651": "Ayudas no monetarias",
-        "653": "Colaboraciones y donativos entregados", "659": "Otras perdidas en gestion corriente",
-        "662": "Intereses de deudas", "669": "Otros gastos financieros", "678": "Gastos excepcionales",
-        "681": "Amortizacion del inmovilizado material",
-        "700": "Venta de articulos de hermandad", "705": "Prestacion de servicios",
-        "720": "Cuotas de hermanos", "721": "Cuotas extraordinarias",
-        "722": "Promociones para captacion de recursos", "723": "Ingresos de patrocinadores y colaboraciones",
-        "728": "Donativos y limosnas", "740": "Subvenciones oficiales a la actividad",
-        "746": "Donaciones y legados a la actividad", "752": "Ingresos por arrendamientos",
-        "759": "Ingresos por servicios diversos", "769": "Otros ingresos financieros",
-        "778": "Ingresos excepcionales"
-    }
+    grupos_3_gastos = [
+        ("600", "Compras de mercaderias"), ("601", "Compra de loteria"), ("621", "Arrendamientos y canones"),
+        ("622", "Reparaciones y conservacion"), ("623", "Servicios de profesionales independientes"),
+        ("624", "Transportes"), ("625", "Primas de seguros"), ("626", "Servicios bancarios y similares"),
+        ("627", "Publicaciones, publicidad y propaganda"), ("628", "Suministros"), ("629", "Otros servicios"),
+        ("631", "Otros tributos"), ("640", "Sueldos y salarios"), ("642", "Seguridad Social a cargo de la entidad"),
+        ("650", "Ayudas monetarias (obra social)"), ("651", "Ayudas no monetarias"),
+        ("653", "Colaboraciones y donativos entregados"), ("659", "Otras perdidas en gestion corriente"),
+        ("662", "Intereses de deudas"), ("669", "Otros gastos financieros"), ("678", "Gastos excepcionales"),
+        ("681", "Amortizacion del inmovilizado material")
+    ]
+    grupos_3_ingresos = [
+        ("700", "Venta de articulos de hermandad"), ("705", "Prestacion de servicios"),
+        ("720", "Cuotas de hermanos"), ("721", "Cuotas extraordinarias"),
+        ("722", "Promociones para captacion de recursos"), ("723", "Ingresos de patrocinadores y colaboraciones"),
+        ("728", "Donativos y limosnas"), ("740", "Subvenciones oficiales a la actividad"),
+        ("746", "Donaciones y legados a la actividad"), ("752", "Ingresos por arrendamientos"),
+        ("759", "Ingresos por servicios diversos"), ("769", "Otros ingresos financieros"),
+        ("778", "Ingresos excepcionales")
+    ]
+    
     filas_detalle = list()
     filas_resumen_3 = list()
     
-    for tipo_op in ["Gasto", "Ingreso"]:
+    for tipo_op, lista_g3 in [("Gasto", grupos_3_gastos), ("Ingreso", grupos_3_ingresos)]:
         partidas = obtener_partidas(tipo_op)
-        subgrupos_temp = dict()
+        subgrupos_temp = {c: {"p": 0.0, "r": 0.0} for c, _ in lista_g3}
+        
         for p in partidas:
-            p_str = str(p)
+            p_str = str(p).strip()
             partes = p_str.split(" - ", 1)
             cod_8 = partes[0].strip() if len(partes) > 1 else p_str[:8].strip()
             nom_sub = partes[1].strip() if len(partes) > 1 else p_str
-            cod_3 = str(cod_8[:3])
+            cod_3 = cod_8[:3]
+            
             pres_v = float(dict_pres.get(p, 0.0))
             real_v = float(df_global.loc[(df_global['Tipo'] == tipo_op) & (df_global['Partida'] == p), 'Importe (€)'].sum()) if not df_global.empty else 0.0
             desv_v = real_v - pres_v
             pct_v = f"{(real_v / pres_v * 100):.1f}%" if pres_v > 0 else ("100.0%" if real_v > 0 else "0.0%")
-            filas_detalle.append({"Tipo": tipo_op.upper(), "Cuenta": cod_8, "Nombre": nom_sub, "Presupuesto (€)": pres_v, "Real (€)": real_v, "Desviación (€)": desv_v, "% Realizado": pct_v})
             
-            if cod_3 not in subgrupos_temp:
-                subgrupos_temp[cod_3] = {"p": 0.0, "r": 0.0}
-            subgrupos_temp[cod_3]["p"] += pres_v
-            subgrupos_temp[cod_3]["r"] += real_v
+            filas_detalle.append({"Tipo": tipo_op.upper(), "Cuenta (8 dígitos)": cod_8, "Nombre Subcuenta": nom_sub, "Presupuesto (€)": pres_v, "Real (€)": real_v, "Desviación (€)": desv_v, "% Realizado": pct_v})
             
-        for c3 in sorted(subgrupos_temp.keys()):
-            tp = subgrupos_temp[c3]["p"]; tr = subgrupos_temp[c3]["r"]; td = tr - tp
+            if cod_3 in subgrupos_temp:
+                subgrupos_temp[cod_3]["p"] += pres_v
+                subgrupos_temp[cod_3]["r"] += real_v
+                
+        tot_g_p, tot_g_r = 0.0, 0.0
+        for c3, nom_g3 in lista_g3:
+            tp = subgrupos_temp[c3]["p"]
+            tr = subgrupos_temp[c3]["r"]
+            td = tr - tp
+            tot_g_p += tp
+            tot_g_r += tr
             tpct = f"{(tr / tp * 100):.1f}%" if tp > 0 else ("100.0%" if tr > 0 else "0.0%")
-            filas_resumen_3.append({"Tipo": tipo_op.upper(), "Grupo (3 dígitos)": c3, "Nombre del Grupo Oficial": grupos_3.get(c3, "Otros conceptos"), "Presupuesto (€)": tp, "Real (€)": tr, "Desviación (€)": td, "% Realizado": tpct})
+            filas_resumen_3.append({"Tipo": tipo_op.upper(), "Grupo (3 dígitos)": c3, "Nombre del Grupo Oficial": nom_g3, "Presupuesto (€)": tp, "Real (€)": tr, "Desviación (€)": td, "% Realizado": tpct})
             
+        filas_resumen_3.append({"Tipo": f"TOTAL {tipo_op.upper()}S", "Grupo (3 dígitos)": "---", "Nombre del Grupo Oficial": f"SUMA TOTAL {tipo_op.upper()}S", "Presupuesto (€)": tot_g_p, "Real (€)": tot_g_r, "Desviación (€)": tot_g_r - tot_g_p, "% Realizado": ""})
+
     df_det = pd.DataFrame(filas_detalle)
     df_res3 = pd.DataFrame(filas_resumen_3)
     
