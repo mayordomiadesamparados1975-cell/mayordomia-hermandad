@@ -948,15 +948,18 @@ with p_con:
         caja_inf = st.number_input("Dinero inicial en Caja Física (€):", min_value=0.0, value=float(caja_ini), step=50.0, format="%.2f")
         banco_inf = st.number_input("Dinero inicial en Cuenta Bancaria (€):", min_value=0.0, value=float(banco_ini), step=50.0, format="%.2f")
         if st.button("💾 Guardar Saldos Iniciales", use_container_width=True):
-            conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf)); conn.commit(); conn.sync(); st.success("Saldos actualizados."); st.rerun()
+            conn = conectar_bd(); cur = conn.cursor()
+            cur.execute("UPDATE saldos_iniciales SET caja_inicio = ?, banco_inicio = ? WHERE id = 1", (caja_inf, banco_inf))
+            conn.commit(); conn.sync()
+            st.cache_data.clear()
+            st.success("Saldos actualizados."); st.rerun()
         mostrar_panel_respaldos(df_global)
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
-                with st.expander("⛪ Cargar Plan Contable Oficial Arzobispado de Sevilla (8 dígitos)", expanded=False):
+        with st.expander("⛪ Cargar Plan Contable Oficial Arzobispado de Sevilla (8 dígitos)", expanded=False):
             st.caption("Carga todas las subcuentas oficiales de 8 dígitos del Arzobispado de Sevilla para cuadrar con los grupos de 3 dígitos.")
             if st.button("📥 Cargar Catálogo Oficial Arzobispado", use_container_width=True, key="btn_plan_sevilla"):
                 plan_arzobispado = [
-                    # GASTOS (Grupo 6)
                     ("Gasto", "60000000 - Compras de mercaderias"),
                     ("Gasto", "60100000 - Compra de loteria"),
                     ("Gasto", "62100000 - Arrendamientos y canones"),
@@ -1001,7 +1004,6 @@ with p_con:
                     ("Gasto", "66900000 - Otros gastos financieros"),
                     ("Gasto", "67800000 - Gastos excepcionales"),
                     ("Gasto", "68100000 - Amortizacion del inmovilizado material"),
-                    # INGRESOS (Grupo 7)
                     ("Ingreso", "70000000 - Venta de articulos de hermandad"),
                     ("Ingreso", "70500000 - Prestacion de servicios"),
                     ("Ingreso", "72000000 - Cuotas de hermanos"),
@@ -1028,17 +1030,26 @@ with p_con:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("Catálogo oficial de 8 dígitos del Arzobispado cargado."); st.rerun()
+
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
-        c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: Lotería de Navidad")
+        c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: 72200003 - Venta de dulces")
         if st.button("Guardar Nueva Partida", use_container_width=True):
-            if not c_nombre.strip(): st.error("Escriba el nombre de la partida.")
+            if not c_nombre.strip():
+                st.error("Escriba el nombre de la partida.")
             else:
-                try: conn = conectar_bd(); cur = conn.cursor(); cur.execute("INSERT INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (c_tipo, c_nombre.strip())); conn.commit(); conn.sync(); st.success("Partida añadida."); st.rerun()
-                except: st.error("Este concepto ya existe.")
+                try:
+                    conn = conectar_bd(); cur = conn.cursor()
+                    cur.execute("INSERT INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (c_tipo, c_nombre.strip()))
+                    conn.commit(); conn.sync()
+                    st.cache_data.clear()
+                    st.success("Partida añadida."); st.rerun()
+                except:
+                    st.error("Este concepto ya existe.")
         st.markdown("---")
         st.markdown("**📋 Gestionar Todos los Conceptos (Predeterminados y Nuevos)**")
         df_p = leer_tabla_turso("SELECT id, tipo, nombre FROM partidas_personalizadas ORDER BY tipo, nombre")
-        if df_p.empty: st.caption("No hay partidas registradas.")
+        if df_p.empty:
+            st.caption("No hay partidas registradas.")
         else:
             with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=True):
                 for _, r_p in df_p.iterrows():
@@ -1056,8 +1067,14 @@ with p_con:
                                             cur.execute("UPDATE partidas_personalizadas SET nombre = ? WHERE id = ?", (nuevo_nom.strip(), pid))
                                             cur.execute("UPDATE contabilidad SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
                                             cur.execute("UPDATE presupuestos SET partida = ? WHERE partida = ? AND tipo = ?", (nuevo_nom.strip(), pnom, ptipo))
-                                            conn.commit(); conn.sync(); st.rerun()
-                                        except: st.error("Ya existe un concepto con ese nombre.")
+                                            conn.commit(); conn.sync()
+                                            st.cache_data.clear(); st.rerun()
+                                        except:
+                                            st.error("Ya existe un concepto con ese nombre.")
                         with cp3:
                             if st.button("❌", key=f"dl_p_{pid}", use_container_width=True):
-                                conn = conectar_bd(); cur = conn.cursor(); cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,)); conn.commit(); conn.sync(); st.rerun()
+                                conn = conectar_bd(); cur = conn.cursor()
+                                cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,))
+                                conn.commit(); conn.sync()
+                                st.cache_data.clear(); st.rerun()
+
