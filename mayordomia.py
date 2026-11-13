@@ -879,22 +879,31 @@ with p_pre:
         val_actual_p = float(dict_pres.get(p_sel, 0.0))
         nuevo_pres = st.number_input("Presupuesto Asignado (€):", min_value=0.0, value=val_actual_p, step=50.0, format="%.2f")
         if st.button("💾 Fijar Presupuesto", use_container_width=True):
-            conn = conectar_bd(); cur = conn.cursor(); cur.execute("INSERT OR REPLACE INTO presupuestos (partida, tipo, importe_presupuestado) VALUES (?, ?, ?)", (p_sel, p_tipo_sel, nuevo_pres)); conn.commit(); conn.sync(); st.success("Presupuesto actualizado."); st.rerun()
+            conn = conectar_bd(); cur = conn.cursor()
+            cur.execute("INSERT OR REPLACE INTO presupuestos (partida, tipo, importe_presupuestado) VALUES (?, ?, ?)", (p_sel, p_tipo_sel, nuevo_pres))
+            conn.commit(); conn.sync()
+            st.cache_data.clear()
+            st.success("Presupuesto actualizado."); st.rerun()
         st.markdown("---")
         st.markdown("**🔒 Cierre de Ejercicio Anual**")
         st.warning("Genera el Acta Oficial en PDF y Excel del año, limpia el libro diario y traspasa el saldo final como fondo inicial del nuevo curso.")
         anio_cierre = st.text_input("Nombre del Ejercicio a cerrar:", value=str(date.today().year))
         if st.button("⚠️ EJECUTAR CIERRE ANUAL", use_container_width=True):
             if not df_global.empty:
-                s_c_fin = caja_ini + df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Caja') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-                s_b_fin = banco_ini + df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Ingreso'), 'Importe (€)'].sum() - df_global.loc[(df_global['Cuenta'] == 'Banco') & (df_global['Tipo'] == 'Gasto'), 'Importe (€)'].sum()
-                pdf_cierre_bytes = generar_pdf_cierre(df_global, anio_cierre, caja_ini, banco_ini, s_c_fin, s_b_fin).getvalue()
+                pdf_cierre_bytes = generar_pdf_cierre(df_global, anio_cierre, caja_ini, banco_ini, s_caja, s_banco).getvalue()
                 st.session_state["ultimo_pdf_cierre"] = pdf_cierre_bytes
                 st.session_state["ultimo_excel_cierre"] = generar_excel(df_global).getvalue()
                 st.session_state["ultimo_anio_cierre"] = anio_cierre
-                conn = conectar_bd(); cur = conn.cursor(); cur.execute("UPDATE saldos_iniciales SET caja_inicio=?, banco_inicio=? WHERE id=1", (s_c_fin, s_b_fin)); cur.execute("DELETE FROM contabilidad"); cur.execute("DELETE FROM archivos_nube"); conn.commit(); conn.sync()
+                conn = conectar_bd(); cur = conn.cursor()
+                cur.execute("UPDATE saldos_iniciales SET caja_inicio=?, banco_inicio=? WHERE id=1", (s_caja, s_banco))
+                cur.execute("DELETE FROM contabilidad")
+                cur.execute("DELETE FROM archivos_nube")
+                cur.execute("DELETE FROM traspasos_internos")
+                conn.commit(); conn.sync()
+                st.cache_data.clear()
                 st.rerun()
-            else: st.error("No hay apuntes que cerrar.")
+            else:
+                st.error("No hay apuntes que cerrar.")
         if "ultimo_pdf_cierre" in st.session_state:
             st.success(f"✅ Ejercicio {st.session_state['ultimo_anio_cierre']} cerrado. Descarga tus actas:")
             st.download_button(label=f"🖨️ DESCARGAR ACTA DE CIERRE {st.session_state['ultimo_anio_cierre']} (PDF)", data=st.session_state["ultimo_pdf_cierre"], file_name=f"Acta_Cierre_{st.session_state['ultimo_anio_cierre']}.pdf", mime="application/pdf", use_container_width=True)
@@ -924,7 +933,7 @@ with p_pre:
                 st.bar_chart(df_comp.set_index("Partida")[["Presupuestado (€)", "Ejecutado (€)"]])
             st.markdown("---")
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
-                    st.markdown("---")
+        st.markdown("---")
         with st.expander("⛪ Informe Oficial Archidiócesis de Sevilla (Grupos 3 dígitos y Subcuentas 8 dígitos)", expanded=False):
             df_r3, df_d8, excel_arz = generar_informe_arzobispado(df_global, dict_pres)
             st.markdown("**1. Resumen Oficial Agrupado por Bloques de 3 Dígitos:**")
