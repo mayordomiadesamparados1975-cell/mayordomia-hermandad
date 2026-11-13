@@ -179,10 +179,17 @@ def procesar_panel_remesas(archivo_excel):
                     st.success(f"¡{len(df_val)} recibos importados en la nube!"); st.rerun()
     except Exception as e:
         st.error(f"No se pudo leer el archivo Excel. Detalle: {e}")
+@st.cache_data(show_spinner=False)
+def obtener_escudo_b64():
+    if os.path.exists("escudo.png"):
+        with open("escudo.png", "rb") as _f:
+            return base64.b64encode(_f.read()).decode()
+    return ""
+
+@st.cache_data(ttl=300, show_spinner=False)
 def obtener_partidas(tipo):
-    conn = conectar_bd(); cursor = conn.cursor()
-    cursor.execute("SELECT nombre FROM partidas_personalizadas WHERE tipo = ? ORDER BY nombre ASC", (tipo,))
-    lista = [itemgetter(0)(f) for f in cursor.fetchall()]
+    cols, rows = ejecutar_turso_http("SELECT nombre FROM partidas_personalizadas WHERE tipo = ? ORDER BY nombre ASC", (tipo,))
+    lista = [itemgetter(0)(f) for f in rows]
     return lista if lista else ["General"]
 
 def guardar_archivo_nube(nombre, bytes_data):
@@ -588,8 +595,23 @@ def generar_informe_arzobispado(df_global, dict_pres):
     return df_res3, df_det, buf_ex, construir_pdf_arz(desarrollado=False), construir_pdf_arz(desarrollado=True)
 
 def dibujar_tabla_movimientos(df_f):
-    for idx, row in df_f.iterrows():
-        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_prov = str(row.get('Proveedor', '') or '').strip(); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
+    total_regs = len(df_f)
+    por_pagina = 25
+    total_paginas = max(1, (total_regs + por_pagina - 1) // por_pagina)
+    
+    if total_paginas > 1:
+        col_pag1, col_pag2 = st.columns((1.5, 3))
+        pagina_actual = col_pag1.number_input(f"Página (1 a {total_paginas}):", min_value=1, max_value=total_paginas, value=1, step=1, key="pag_diario")
+        col_pag2.caption(f"Mostrando bloques de {por_pagina} apuntes para máxima fluidez (Total filtrados: {total_regs}).")
+    else:
+        pagina_actual = 1
+        
+    inicio = (pagina_actual - 1) * por_pagina
+    fin = inicio + por_pagina
+    df_pagina = df_f.iloc[inicio:fin]
+
+    for idx, row in df_pagina.iterrows():
+        r_id = row.get('id'); r_tipo = row.get('Tipo'); r_cue = row.get('Cuenta'); r_par = row.get('Partida'); r_prov = str(row.get('Proveedor', '') or '').strip(); r_fac = str(row.get('Nº Factura', '') or '').strip(); r_con = row.get('Concepto'); r_fec = row.get('Fecha'); r_pag = row.get('Forma Pago'); r_imp = float(row.get('Importe (€)')); r_com = row.get('Comprobante')
         es_pend = int(row.get('Pendiente', 0)) if pd.notna(row.get('Pendiente')) else 0
 
         with st.container(border=True):
@@ -597,7 +619,8 @@ def dibujar_tabla_movimientos(df_f):
             ca.markdown(f"**#{r_id}**")
             txt_p = " <span style='color:#d97706; font-weight:bold; font-size:11px; background:#fef3c7; padding:2px 6px; border-radius:3px;'>⏳ PENDIENTE</span>" if es_pend == 1 else ""
             txt_prov = f" <span style='color:#800020; font-weight:bold;'>[{r_prov}]</span>" if r_prov else ""
-            cb.markdown(f"**{r_par}**{txt_prov} - {r_con}{txt_p}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
+            txt_fac = f" <span style='color:#4b5563; font-size:11.5px; background:#f3f4f6; padding:1px 5px; border-radius:3px;'>Doc: {r_fac}</span>" if r_fac else ""
+            cb.markdown(f"**{r_par}**{txt_prov}{txt_fac} - {r_con}{txt_p}<br/><small style='color:gray;'>{r_fec} | {r_pag} ({r_cue})</small>", unsafe_allow_html=True)
             c_val = "green" if r_tipo == 'Ingreso' else "red"
             cc.markdown(f"<h4 style='color:{c_val}; margin:0;'>{r_imp:,.2f} €</h4>", unsafe_allow_html=True)
             
