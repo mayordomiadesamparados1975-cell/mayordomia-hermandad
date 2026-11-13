@@ -750,7 +750,7 @@ with p_fil:
         if id_a_editar:
             df_buscado = df_global.loc[df_global['id'] == id_a_editar]
             if not df_buscado.empty:
-                r_edit = df_buscado.iloc
+                r_edit = df_buscado.iloc[0]
                 c_ed1, c_ed2 = st.columns(2)
                 ed_fec = c_ed1.text_input("Fecha:", value=str(r_edit.get('Fecha')), key=f"cef_fec_{id_a_editar}")
                 ed_cue = c_ed1.selectbox("Cuenta:", ["Caja", "Banco"], index=0 if r_edit.get('Cuenta')=="Caja" else 1, key=f"cef_cue_{id_a_editar}")
