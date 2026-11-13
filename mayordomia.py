@@ -479,9 +479,11 @@ def generar_informe_arzobispado(df_global, dict_pres):
         partidas = obtener_partidas(tipo_op)
         subgrupos_temp = dict()
         for p in partidas:
-            cod_8 = p.split(" - ") if " - " in p else p[:8]
-            nom_sub = p.split(" - ") if " - " in p else p
-            cod_3 = cod_8[:3]
+            p_str = str(p)
+            partes = p_str.split(" - ", 1)
+            cod_8 = partes[0].strip() if len(partes) > 1 else p_str[:8].strip()
+            nom_sub = partes[1].strip() if len(partes) > 1 else p_str
+            cod_3 = str(cod_8[:3])
             pres_v = float(dict_pres.get(p, 0.0))
             real_v = float(df_global.loc[(df_global['Tipo'] == tipo_op) & (df_global['Partida'] == p), 'Importe (€)'].sum()) if not df_global.empty else 0.0
             desv_v = real_v - pres_v
