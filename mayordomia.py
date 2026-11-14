@@ -512,98 +512,140 @@ def generar_informe_arzobispado(df_global, dict_pres):
     buf_ex.seek(0)
     def construir_pdf_palacio(desarrollado=False):
         b_pdf = io.BytesIO()
-        doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=32, leftMargin=32, topMargin=28, bottomMargin=28)
-        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_suave = colors.HexColor("#E5E7EB")
-        t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=13, leading=16, alignment=1, textColor=burdeos)
-        n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=10.5)
-        n_der = ParagraphStyle('ND', parent=styles['Normal'], fontSize=8, leading=10.5, alignment=2)
+        doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=28, leftMargin=28, topMargin=25, bottomMargin=25)
+        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_cab = colors.HexColor("#D1D5DB"); gris_suave = colors.HexColor("#F3F4F6")
+        n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=7.6, leading=9.5)
+        n_der = ParagraphStyle('ND', parent=styles['Normal'], fontSize=7.6, leading=9.5, alignment=2)
+        n_cen = ParagraphStyle('NC', parent=styles['Normal'], fontSize=7.6, leading=9.5, alignment=1)
         
-        if os.path.exists("escudo.png"):
-            try: img = RLImage("escudo.png", width=48, height=48); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 4))
-            except: pass
-        story.append(Paragraph("<b>ARCHIDIÓCESIS DE SEVILLA — PROTECTORADO CANÓNICO DE HH. Y CC.</b>", t_st))
-        story.append(Paragraph(f"<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS — EJERCICIO {date.today().year}</b>", ParagraphStyle('SubA', alignment=1, fontSize=9.5, textColor=burdeos)))
-        story.append(Spacer(1, 8))
+        df_leg = leer_tabla_turso("SELECT clave, valor FROM config_sistema WHERE clave LIKE 'leg_%'")
+        d_leg = dict(zip(df_leg['clave'], df_leg['valor'])) if not df_leg.empty else {}
+        v_cif = d_leg.get("leg_cif", "________________")
+        v_loc = d_leg.get("leg_loc", "Sevilla")
+        v_par = d_leg.get("leg_par", "__________________________")
+        v_reg = d_leg.get("leg_reg", "____________")
+        v_ley = d_leg.get("leg_ley", "NO")
+        marca_si = "<b>[ X ]</b>" if v_ley == "SI" else "[   ]"
+        marca_no = "<b>[ X ]</b>" if v_ley != "SI" else "[   ]"
+
+        esc_cell = RLImage("escudo.png", width=52, height=52) if os.path.exists("escudo.png") else ""
+        ficha_izq = Paragraph(
+            f"<b>HERMANDAD:</b> NUESTRA SEÑORA DE LOS DESAMPARADOS<br/>"
+            f"<b>CIF:</b> {v_cif} &nbsp;&nbsp;&nbsp; <b>Localidad:</b> {v_loc}<br/>"
+            f"<b>Parroquia:</b> {v_par}<br/>"
+            f"<b>Inscripción Registro Entidad Religiosa nº:</b> {v_reg}<br/>"
+            f"Acogida a Ley 49/2002 entidades sin ánimo de lucro e incentivos fiscales al mecenazgo: &nbsp; SI {marca_si} &nbsp;&nbsp; NO {marca_no}",
+            ParagraphStyle('Leg', parent=styles['Normal'], fontSize=8, leading=11.5)
+        )
+        cab_der = Paragraph("<b>Archidiócesis de Sevilla</b><br/><font size='7.5' color='#4B5563'>Administración General<br/>Protectorado Canónico</font>", ParagraphStyle('Arz', alignment=1, fontSize=9.5, textColor=burdeos, leading=11))
+        t_cab = RLTable([[ficha_izq, esc_cell, cab_der]], colWidths=(365, 65, 120))
+        t_cab.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (1,0), (2,0), 'CENTER')]))
+        story.append(t_cab); story.append(Spacer(1, 10))
 
         tot_gas = sum(subgrupos_data[c]["r"] for c, _ in gastos_grupos)
         tot_ing_ord = sum(subgrupos_data[c]["r"] for c, _ in ing_ord_grupos)
         tot_ing_no = sum(subgrupos_data[c]["r"] for c, _ in ing_no_ord_grupos)
         tot_ing_gen = tot_ing_ord + tot_ing_no
-
         if not desarrollado:
-            story.append(Paragraph("<b>RESUMEN DE CUENTAS ANUALES (MODELO PALACIO ARZOBISPAL)</b>", ParagraphStyle('R1', alignment=1, fontSize=10)))
+            story.append(Paragraph(f"<b>RESUMEN DE CUENTAS EJERCICIO {date.today().year}</b>", ParagraphStyle('TitR', alignment=1, fontSize=11, textColor=burdeos)))
             story.append(Spacer(1, 8))
-            t_res = [[Paragraph("<b><font color='white'>Cód.</font></b>", n_st), Paragraph("<b><font color='white'>GASTOS</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der), Paragraph("<b><font color='white'>Cód.</font></b>", n_st), Paragraph("<b><font color='white'>INGRESOS</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der)]]
-            der_rows = [("---", "<b>INGRESOS ORDINARIOS</b>", "")] + [(c, n, f"{subgrupos_data[c]['r']:,.2f} €") for c, n in ing_ord_grupos] + [("", "<b>TOTAL INGRESOS ORDINARIOS</b>", f"<b>{tot_ing_ord:,.2f} €</b>"), ("---", "<b>INGRESOS NO ORDINARIOS</b>", "")] + [(c, n, f"{subgrupos_data[c]['r']:,.2f} €") for c, n in ing_no_ord_grupos] + [("", "<b>TOTAL INGRESOS NO ORDINARIOS</b>", f"<b>{tot_ing_no:,.2f} €</b>")]
-            izq_rows = [(c, n, f"{subgrupos_data[c]['r']:,.2f} €") for c, n in gastos_grupos] + [("", "<b>TOTAL GASTOS</b>", f"<b>{tot_gas:,.2f} €</b>")]
-            max_r = max(len(izq_rows), len(der_rows))
-            for i in range(max_r):
-                iz = izq_rows[i] if i < len(izq_rows) else ("", "", "")
-                de = der_rows[i] if i < len(der_rows) else ("", "", "")
-                t_res.append([Paragraph(f"<b>{iz[0]}</b>", n_st), Paragraph(iz[1], n_st), Paragraph(iz[2], n_der), Paragraph(f"<b>{de[0]}</b>", n_st), Paragraph(de[1], n_st), Paragraph(de[2], n_der)])
-            tr_tbl = RLTable(t_res, colWidths=(32, 165, 68, 32, 165, 68))
-            tr_tbl.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 4), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
-            story.append(tr_tbl); story.append(Spacer(1, 12))
+            
+            t_g = [[Paragraph("<b>GASTOS</b>", n_cen), "", ""]]
+            for c, n in gastos_grupos:
+                t_g.append([Paragraph(f"<b>{c}</b>", n_cen), Paragraph(n, n_st), Paragraph(f"{subgrupos_data[c]['r']:,.2f} €", n_der)])
+            t_g.append(["", Paragraph("<b>TOTAL GASTOS</b>", n_der), Paragraph(f"<b>{tot_gas:,.2f} €</b>", n_der)])
+            tbl_g = RLTable(t_g, colWidths=(26, 178, 64))
+            tbl_g.setStyle(TableStyle([('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), gris_cab), ('GRID', (0,0), (-1,-2), 0.5, colors.black), ('GRID', (2,-1), (2,-1), 0.8, colors.black), ('PADDING', (0,0), (-1,-1), 3.8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+            
+            t_io = [[Paragraph("<b>INGRESOS ORDINARIOS</b>", n_cen), "", ""]]
+            for c, n in ing_ord_grupos:
+                t_io.append([Paragraph(f"<b>{c}</b>", n_cen), Paragraph(n, n_st), Paragraph(f"{subgrupos_data[c]['r']:,.2f} €", n_der)])
+            t_io.append(["", Paragraph("<b>TOTAL INGRESOS ORDINARIOS</b>", n_der), Paragraph(f"<b>{tot_ing_ord:,.2f} €</b>", n_der)])
+            tbl_io = RLTable(t_io, colWidths=(26, 178, 64))
+            tbl_io.setStyle(TableStyle([('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), gris_cab), ('GRID', (0,0), (-1,-2), 0.5, colors.black), ('GRID', (2,-1), (2,-1), 0.8, colors.black), ('PADDING', (0,0), (-1,-1), 3.8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+            
+            t_ino = [[Paragraph("<b>INGRESOS NO ORDINARIOS</b>", n_cen), "", ""]]
+            for c, n in ing_no_ord_grupos:
+                t_ino.append([Paragraph(f"<b>{c}</b>", n_cen), Paragraph(n, n_st), Paragraph(f"{subgrupos_data[c]['r']:,.2f} €", n_der)])
+            t_ino.append(["", Paragraph("<b>TOTAL INGRESOS NO ORDINARIOS</b>", n_der), Paragraph(f"<b>{tot_ing_no:,.2f} €</b>", n_der)])
+            tbl_ino = RLTable(t_ino, colWidths=(26, 178, 64))
+            tbl_ino.setStyle(TableStyle([('SPAN', (0,0), (-1,0)), ('BACKGROUND', (0,0), (-1,0), gris_cab), ('GRID', (0,0), (-1,-2), 0.5, colors.black), ('GRID', (2,-1), (2,-1), 0.8, colors.black), ('PADDING', (0,0), (-1,-1), 3.8), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+            
+            col_der_stack = RLTable([[tbl_io], [Spacer(1, 14)], [tbl_ino]], colWidths=(268,))
+            col_der_stack.setStyle(TableStyle([('LEFTPADDING', (0,0), (-1,-1), 0), ('RIGHTPADDING', (0,0), (-1,-1), 0), ('TOPPADDING', (0,0), (-1,-1), 0), ('BOTTOMPADDING', (0,0), (-1,-1), 0)]))
+            
+            t_paralelo = RLTable([[tbl_g, "", col_der_stack]], colWidths=(268, 14, 268))
+            t_paralelo.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('LEFTPADDING', (0,0), (-1,-1), 0), ('RIGHTPADDING', (0,0), (-1,-1), 0)]))
+            story.append(t_paralelo); story.append(Spacer(1, 16))
             
             t_cuadre = [
-                [Paragraph("<b>Resultado del Ejercicio anterior (Saldos Iniciales Caja + Banco)</b>", n_st), Paragraph(f"<b>{(caja_ini + banco_ini):,.2f} €</b>", n_der)],
-                [Paragraph("<b>Total de ingresos (ordinarios + no ordinarios)</b>", n_st), Paragraph(f"<b>{tot_ing_gen:,.2f} €</b>", n_der)],
+                [Paragraph("<b>Resultado del Ejercicio anterior</b>", n_st), Paragraph(f"<b>{(caja_ini + banco_ini):,.2f} €</b>", n_der)],
+                [Paragraph("<b>Total de ingresos</b> (ordinarios + no ordinarios)", n_st), Paragraph(f"<b>{tot_ing_gen:,.2f} €</b>", n_der)],
                 [Paragraph("<b>Total de gastos</b>", n_st), Paragraph(f"<b>{tot_gas:,.2f} €</b>", n_der)],
-                [Paragraph("<b>Resultado (resultado ejercicio anterior + total ingresos - total gastos)</b>", n_st), Paragraph(f"<b>{(caja_ini + banco_ini + tot_ing_gen - tot_gas):,.2f} €</b>", n_der)]
+                [Paragraph("<b>Resultado</b> (resultado ejercicio anterior + total ingresos - total gastos)", n_st), Paragraph(f"<b>{(caja_ini + banco_ini + tot_ing_gen - tot_gas):,.2f} €</b>", n_der)]
             ]
-            tc_tbl = RLTable(t_cuadre, colWidths=(420, 110))
-            tc_tbl.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.6, burdeos), ('BACKGROUND', (0,3), (-1,3), colors.HexColor("#FDF2F2")), ('PADDING', (0,0), (-1,-1), 5)]))
+            tc_tbl = RLTable(t_cuadre, colWidths=(460, 90))
+            tc_tbl.setStyle(TableStyle([('BOX', (0,0), (-1,-1), 1.2, colors.black), ('GRID', (1,0), (1,-1), 0.6, colors.black), ('BACKGROUND', (0,3), (-1,3), gris_suave), ('PADDING', (0,0), (-1,-1), 5)]))
             story.append(tc_tbl)
         else:
-            for titulo_b, lista_b, tot_b in [("DESGLOSE DE GASTOS", gastos_grupos, tot_gas), ("DESGLOSE DE INGRESOS ORDINARIOS", ing_ord_grupos, tot_ing_ord), ("DESGLOSE DE INGRESOS NO ORDINARIOS", ing_no_ord_grupos, tot_ing_no)]:
-                story.append(Paragraph(f"<b>{titulo_b}</b>", ParagraphStyle('B1', fontSize=9.5, textColor=burdeos)))
-                story.append(Spacer(1, 4))
-                t_des = [[Paragraph("<b><font color='white'>Cód.</font></b>", n_st), Paragraph("<b><font color='white'>Concepto / Subcuenta</font></b>", n_st), Paragraph("<b><font color='white'>Subcuenta</font></b>", n_der), Paragraph("<b><font color='white'>Total Grupo</font></b>", n_der)]]
-                est_d = list(); r_i = 1
-                for c2, nom2 in lista_b:
-                    t_des.append([Paragraph(f"<b>{c2}</b>", n_st), Paragraph(f"<b>{c2} - {nom2}</b>", n_st), "", Paragraph(f"<b>{subgrupos_data[c2]['r']:,.2f} €</b>", n_der)])
-                    est_d.append(('BACKGROUND', (0, r_i), (-1, r_i), gris_suave))
-                    r_i += 1
+            t_dg = [[Paragraph("<b>GASTOS</b>", n_cen), "", Paragraph("<b>Importe</b>", n_cen)]]
+            est_dg = list(); r_i = 1
+            for c2, nom2 in gastos_grupos:
+                t_dg.append([Paragraph(f"<b>{c2} - {nom2}</b>", n_st), "", Paragraph(f"<b>{subgrupos_data[c2]['r']:,.2f} €</b>", n_der)])
+                est_dg.append(('SPAN', (0, r_i), (1, r_i))); est_dg.append(('BACKGROUND', (0, r_i), (-1, r_i), gris_suave)); r_i += 1
+                for hc, hn, hv in subgrupos_data[c2]["hijos"]:
+                    t_dg.append([Paragraph(f"<b>{hc}</b>", n_cen), Paragraph(hn, n_st), Paragraph(f"{hv:,.2f} €", n_der)]); r_i += 1
+            t_dg.append(["", Paragraph("<b>TOTAL GASTOS</b>", n_der), Paragraph(f"<b>{tot_gas:,.2f} €</b>", n_der)])
+            est_dg.append(('BACKGROUND', (1, r_i), (-1, r_i), gris_cab))
+            tdg_tbl = RLTable(t_dg, colWidths=(42, 428, 80))
+            tdg_tbl.setStyle(TableStyle([('SPAN', (0,0), (1,0)), ('BACKGROUND', (0,0), (-1,0), gris_cab), ('GRID', (0,0), (-1,-1), 0.4, colors.black), ('PADDING', (0,0), (-1,-1), 2.6)] + est_dg))
+            story.append(tdg_tbl)
+            
+            story.append(PageBreak())
+            t_di = [[Paragraph("<b>INGRESOS</b>", n_cen), "", Paragraph("<b>Importe</b>", n_cen)]]
+            est_di = list(); r_i = 1
+            for titulo_sub, lista_sub, tot_sub in [("ORDINARIOS", ing_ord_grupos, tot_ing_ord), ("NO ORDINARIOS", ing_no_ord_grupos, tot_ing_no)]:
+                for c2, nom2 in lista_sub:
+                    t_di.append([Paragraph(f"<b>{c2} - {titulo_sub} - {nom2}</b>", n_st), "", Paragraph(f"<b>{subgrupos_data[c2]['r']:,.2f} €</b>", n_der)])
+                    est_di.append(('SPAN', (0, r_i), (1, r_i))); est_di.append(('BACKGROUND', (0, r_i), (-1, r_i), gris_suave)); r_i += 1
                     for hc, hn, hv in subgrupos_data[c2]["hijos"]:
-                        t_des.append([Paragraph(hc, n_st), Paragraph(hn, n_st), Paragraph(f"{hv:,.2f} €", n_der), ""])
-                        r_i += 1
-                t_des.append(["", Paragraph(f"<b>TOTAL {titulo_b.replace('DESGLOSE DE ', '')}</b>", n_st), "", Paragraph(f"<b>{tot_b:,.2f} €</b>", n_der)])
-                est_d.append(('BACKGROUND', (0, r_i), (-1, r_i), colors.HexColor("#FDF2F2")))
-                td_tbl = RLTable(t_des, colWidths=(45, 335, 75, 75))
-                td_tbl.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.4, colors.grey), ('PADDING', (0,0), (-1,-1), 3.5)] + est_d))
-                story.append(td_tbl); story.append(Spacer(1, 10))
+                        t_di.append([Paragraph(f"<b>{hc}</b>", n_cen), Paragraph(hn, n_st), Paragraph(f"{hv:,.2f} €", n_der)]); r_i += 1
+                t_di.append(["", Paragraph(f"<b>TOTAL INGRESOS {titulo_sub}</b>", n_der), Paragraph(f"<b>{tot_sub:,.2f} €</b>", n_der)])
+                est_di.append(('BACKGROUND', (1, r_i), (-1, r_i), gris_cab)); r_i += 1
+            t_di.append(["", Paragraph("<b>TOTAL INGRESOS</b>", n_der), Paragraph(f"<b>{tot_ing_gen:,.2f} €</b>", n_der)])
+            est_di.append(('BACKGROUND', (1, r_i), (-1, r_i), gris_cab))
+            tdi_tbl = RLTable(t_di, colWidths=(42, 428, 80))
+            tdi_tbl.setStyle(TableStyle([('SPAN', (0,0), (1,0)), ('BACKGROUND', (0,0), (-1,0), gris_cab), ('GRID', (0,0), (-1,-1), 0.4, colors.black), ('PADDING', (0,0), (-1,-1), 3.0)] + est_di))
+            story.append(tdi_tbl)
 
         story.append(PageBreak())
-        story.append(Paragraph(f"<b>ESTADO FINANCIERO AL 31 DE DICIEMBRE DE {date.today().year}</b>", t_st))
-        story.append(Spacer(1, 12))
         pend_cobrar = float(df_global.loc[(df_global['Tipo'] == 'Ingreso') & (df_global['Pendiente'] == 1), 'Importe (€)'].sum()) if not df_global.empty else 0.0
         pend_pagar = float(df_global.loc[(df_global['Tipo'] == 'Gasto') & (df_global['Pendiente'] == 1), 'Importe (€)'].sum()) if not df_global.empty else 0.0
         
         t_ef = [
-            [Paragraph("<b><font color='white'>ACTIVO / TESORERÍA</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der), Paragraph("<b><font color='white'>PASIVO / DEUDAS</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der)],
+            [Paragraph(f"<b>ESTADO FINANCIERO AL 31 DE DICIEMBRE {date.today().year}</b>", ParagraphStyle('EF', alignment=1, fontSize=9.5)), "", "", ""],
             [Paragraph("Saldo en Caja", n_st), Paragraph(f"{s_caja:,.2f} €", n_der), Paragraph("Préstamos recibidos", n_st), Paragraph("0,00 €", n_der)],
             [Paragraph("Saldo en Banco", n_st), Paragraph(f"{s_banco:,.2f} €", n_der), Paragraph("Cuentas Pendientes de pagar", n_st), Paragraph(f"{pend_pagar:,.2f} €", n_der)],
             [Paragraph("Depósitos e IPF", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con Seguridad Social", n_st), Paragraph("0,00 €", n_der)],
-            [Paragraph("Inversiones en Fondos Públicos", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con la Agencia Tributaria", n_st), Paragraph("0,00 €", n_der)],
+            [Paragraph("Inversiones en Fondos Públicos (nominal)", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con la Agencia Tributaria", n_st), Paragraph("0,00 €", n_der)],
             [Paragraph("Inversiones en Bolsa de Valores", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con otras entidades públicas", n_st), Paragraph("0,00 €", n_der)],
             [Paragraph("Cuentas pendientes de cobrar", n_st), Paragraph(f"{pend_cobrar:,.2f} €", n_der), "", ""],
             [Paragraph("Préstamos concedidos", n_st), Paragraph("0,00 €", n_der), "", ""]
         ]
-        tef_tbl = RLTable(t_ef, colWidths=(185, 80, 185, 80))
-        tef_tbl.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 6)]))
-        story.append(tef_tbl); story.append(Spacer(1, 45))
+        tef_tbl = RLTable(t_ef, colWidths=(195, 80, 195, 80))
+        tef_tbl.setStyle(TableStyle([('SPAN', (0,0), (-1,0)), ('BOX', (0,0), (-1,-1), 1.2, colors.black), ('LINEBELOW', (0,0), (-1,0), 1.0, colors.black), ('LINEAFTER', (1,1), (1,-1), 1.0, colors.black), ('GRID', (1,1), (1,-1), 0.5, colors.black), ('GRID', (3,1), (3,5), 0.5, colors.black), ('PADDING', (0,0), (-1,-1), 5)]))
+        story.append(tef_tbl); story.append(Spacer(1, 55))
         
-        tf = RLTable([[Paragraph("<b>Mayordomo</b><br/><br/><br/>Fdo: _________________________", ParagraphStyle('F1', alignment=1, fontSize=9)), Paragraph("<b>Hermano Mayor</b><br/><br/><br/>Fdo: _________________________", ParagraphStyle('F2', alignment=1, fontSize=9))]], colWidths=(265, 265))
+        tf = RLTable([[Paragraph("Mayordomo<br/><br/><br/><br/>Fdo: _________________________", ParagraphStyle('F1', alignment=1, fontSize=9)), Paragraph("Hermano Mayor<br/><br/><br/><br/>Fdo: _________________________", ParagraphStyle('F2', alignment=1, fontSize=9))]], colWidths=(275, 275))
         tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
-        story.append(tf); story.append(Spacer(1, 30))
-        story.append(Paragraph("Sello de la Hermandad<br/><br/>En Sevilla, a _____ de ___________________ de 20____.", ParagraphStyle('Sel', alignment=1, fontSize=9)))
-        story.append(Spacer(1, 20))
-        story.append(Paragraph("<b>Delegado Episcopal Asuntos Jurídicos HH y CC — Protectorado Canónico de la Archidiócesis de Sevilla</b>", ParagraphStyle('Pie', alignment=1, fontSize=8, textColor=colors.gray)))
+        story.append(tf); story.append(Spacer(1, 45))
+        story.append(Paragraph("Sello de la Hermandad<br/><br/><br/><b>En Sevilla, el ____ de ___________________ de 20____ .</b>", ParagraphStyle('Sel', alignment=1, fontSize=9)))
+        story.append(Spacer(1, 45))
+        story.append(Paragraph("<b>Delegado Episcopal Asuntos Jurídicos HH y CC<br/>Protectorado Canónico de la Archidiócesis de Sevilla</b>", ParagraphStyle('Pie', alignment=1, fontSize=8.5)))
         
         doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical)
         b_pdf.seek(0)
         return b_pdf
-
     return df_res3, df_det, buf_ex, construir_pdf_palacio(desarrollado=False), construir_pdf_palacio(desarrollado=True)
 
 def dibujar_tabla_movimientos(df_f):
@@ -1086,6 +1128,23 @@ with p_con:
             st.cache_data.clear()
             st.success("Saldos actualizados."); st.rerun()
         mostrar_panel_respaldos(df_global)
+        st.markdown("---")
+        with st.expander("🏛️ Datos Legales y Canónicos (Cabecera Oficial Arzobispado)", expanded=False):
+            st.caption("Se imprimen automáticamente en el encabezado del Resumen de Cuentas para Palacio Arzobispal.")
+            df_cfg_leg = leer_tabla_turso("SELECT clave, valor FROM config_sistema WHERE clave LIKE 'leg_%'")
+            dict_leg = dict(zip(df_cfg_leg['clave'], df_cfg_leg['valor'])) if not df_cfg_leg.empty else {}
+            l_cif = st.text_input("CIF de la Hermandad:", value=dict_leg.get("leg_cif", ""), placeholder="Ej: R4100000A")
+            l_loc = st.text_input("Localidad:", value=dict_leg.get("leg_loc", "Sevilla"))
+            l_par = st.text_input("Parroquia / Sede Canónica:", value=dict_leg.get("leg_par", ""))
+            l_reg = st.text_input("Nº Inscripción Registro Entidades Religiosas:", value=dict_leg.get("leg_reg", ""))
+            l_ley = st.selectbox("¿Acogida a Ley 49/2002 (Mecenazgo)?", ["NO", "SI"], index=1 if dict_leg.get("leg_ley") == "SI" else 0)
+            if st.button("💾 Guardar Datos Canónicos", use_container_width=True, key="btn_sv_leg"):
+                conn = conectar_bd(); cur = conn.cursor()
+                for k_l, v_l in [("leg_cif", l_cif.strip()), ("leg_loc", l_loc.strip()), ("leg_par", l_par.strip()), ("leg_reg", l_reg.strip()), ("leg_ley", l_ley)]:
+                    cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES (?, ?)", (k_l, v_l))
+                conn.commit(); conn.sync()
+                st.cache_data.clear()
+                st.success("Datos canónicos guardados."); st.rerun()
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
         with st.expander("⛪ Cargar Plan Oficial Archidiócesis de Sevilla (Letras AH - VH)", expanded=False):
