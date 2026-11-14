@@ -746,8 +746,8 @@ if "usr_activo" not in st.session_state:
 
 # 1. Dibujamos el Escudo y el Título de la Hermandad
 _esc_b64 = obtener_escudo_b64()
-img_b64 = f'<img src="data:image/png;base64,{_esc_b64}" style="height: 75px; margin-right: 15px;">' if _esc_b64 else ""
-
+img_b64 = f'<img src="data:image/png;base64,{_esc_b64}" style="height: 85px; margin-right: 15px;">' if _esc_b64 else ""
+st.markdown(f"<div style='display: flex; align-items: center; justify-content: center; padding: 5px 0;'>{img_b64}<div><h1 style='margin: 0; font-size: 24px; color: #800020;'>Hermandad de Nuestra Señora de los Desamparados</h1><p style='margin: 0; color: #6B7280; font-size: 12px; font-weight: bold; letter-spacing: 1.5px;'>MAYORDOMÍA INSTITUCIONAL (NUBE)</p></div></div>", unsafe_allow_html=True)
 st.markdown("---")
 
 # 2. DETECTOR DE MÓVIL (Fuerza la vista simplificada de forma automática)
