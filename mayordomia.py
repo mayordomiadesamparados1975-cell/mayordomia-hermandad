@@ -1015,7 +1015,7 @@ with p_pre:
             st.success(f"✅ Ejercicio {st.session_state['ultimo_anio_cierre']} cerrado. Descarga tus actas:")
             st.download_button(label=f"🖨️ DESCARGAR ACTA DE CIERRE {st.session_state['ultimo_anio_cierre']} (PDF)", data=st.session_state["ultimo_pdf_cierre"], file_name=f"Acta_Cierre_{st.session_state['ultimo_anio_cierre']}.pdf", mime="application/pdf", use_container_width=True)
             st.download_button(label=f"📊 DESCARGAR LIBRO DIARIO {st.session_state['ultimo_anio_cierre']} (EXCEL)", data=st.session_state["ultimo_excel_cierre"], file_name=f"Cierre_{st.session_state['ultimo_anio_cierre']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        with col_p2:
+    with col_p2:
         tablas_tot = dict()
         for tipo_comp in ["Ingreso", "Gasto"]:
             icono_t = "📈" if tipo_comp == "Ingreso" else "📉"
@@ -1024,14 +1024,14 @@ with p_pre:
             tot_p, tot_e = 0.0, 0.0
             todas_partidas = obtener_partidas(tipo_comp)
             for part in todas_partidas:
-                cod_p = str(part).split(" - ")[0].strip()
+                cod_p = str(part).split(" - ").strip()
                 pres_directo = float(dict_pres.get(part, 0.0))
                 ejec_directo = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'] == part), 'Importe (€)'].sum()) if not df_global.empty else 0.0
                 tot_p += pres_directo
                 tot_e += ejec_directo
 
                 if len(cod_p) == 3 and cod_p.isdigit():
-                    pres_v = sum(float(dict_pres.get(x, 0.0)) for x in todas_partidas if str(x).split(" - ")[0].strip().startswith(cod_p))
+                    pres_v = sum(float(dict_pres.get(x, 0.0)) for x in todas_partidas if str(x).split(" - ").strip().startswith(cod_p))
                     ejec_v = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'].str.startswith(cod_p)), 'Importe (€)'].sum()) if not df_global.empty else 0.0
                 else:
                     pres_v = pres_directo
