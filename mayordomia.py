@@ -461,27 +461,82 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 def generar_informe_arzobispado(df_global, dict_pres):
-    grupos_3_gastos = [
-        ("600", "Compras de mercaderias"), ("601", "Compra de loteria"), ("621", "Arrendamientos y canones"),
-        ("622", "Reparaciones y conservacion"), ("623", "Servicios de profesionales independientes"),
-        ("624", "Transportes"), ("625", "Primas de seguros"), ("626", "Servicios bancarios y similares"),
-        ("627", "Publicaciones, publicidad y propaganda"), ("628", "Suministros"), ("629", "Otros servicios"),
-        ("631", "Otros tributos"), ("640", "Sueldos y salarios"), ("642", "Seguridad Social a cargo de la entidad"),
-        ("650", "Ayudas monetarias (obra social)"), ("651", "Ayudas no monetarias"),
-        ("653", "Colaboraciones y donativos entregados"), ("659", "Otras perdidas en gestion corriente"),
-        ("662", "Intereses de deudas"), ("669", "Otros gastos financieros"), ("678", "Gastos excepcionales"),
-        ("681", "Amortizacion del inmovilizado material")
-    ]
-    grupos_3_ingresos = [
-        ("700", "Venta de articulos de hermandad"), ("705", "Prestacion de servicios"),
-        ("720", "Cuotas de hermanos"), ("721", "Cuotas extraordinarias"),
-        ("722", "Promociones para captacion de recursos"), ("723", "Ingresos de patrocinadores y colaboraciones"),
-        ("728", "Donativos y limosnas"), ("740", "Subvenciones oficiales a la actividad"),
-        ("746", "Donaciones y legados a la actividad"), ("752", "Ingresos por arrendamientos"),
-        ("759", "Ingresos por servicios diversos"), ("769", "Otros ingresos financieros"),
-        ("778", "Ingresos excepcionales")
-    ]
-    
+                plan_arzobispado = [
+                    # GASTOS (Grupo 6: Cuentas de 3 cifras y Subcuentas de 8 cifras)
+                    ("Gasto", "600 - Compras de mercaderias"),
+                    ("Gasto", "601 - Compra de loteria"),
+                    ("Gasto", "621 - Arrendamientos y canones"),
+                    ("Gasto", "622 - Reparaciones y conservacion"),
+                    ("Gasto", "623 - Servicios de profesionales independientes"),
+                    ("Gasto", "624 - Transportes"),
+                    ("Gasto", "625 - Primas de seguros"),
+                    ("Gasto", "626 - Servicios bancarios y similares"),
+                    ("Gasto", "627 - Publicaciones, publicidad y propaganda"),
+                    ("Gasto", "62700000 - Boletin de la hermandad"),
+                    ("Gasto", "62700001 - Carteles y convocatorias"),
+                    ("Gasto", "628 - Suministros"),
+                    ("Gasto", "62800000 - Casa de hermandad: luz"),
+                    ("Gasto", "62800001 - Casa de hermandad: agua"),
+                    ("Gasto", "62800002 - Casa de hermandad: telefono e internet"),
+                    ("Gasto", "629 - Otros servicios"),
+                    ("Gasto", "62900000 - Culto: cera"),
+                    ("Gasto", "62900001 - Culto: flores y exorno"),
+                    ("Gasto", "62900002 - Culto: musica y capillas"),
+                    ("Gasto", "62900003 - Culto: predicadores y celebraciones"),
+                    ("Gasto", "62900004 - Culto: imprenta y estampas"),
+                    ("Gasto", "62900005 - Culto: otros gastos"),
+                    ("Gasto", "62900010 - Estacion de penitencia: costaleros"),
+                    ("Gasto", "62900011 - Estacion de penitencia: bandas"),
+                    ("Gasto", "62900012 - Estacion de penitencia: montaje de pasos"),
+                    ("Gasto", "62900013 - Estacion de penitencia: seguros y permisos"),
+                    ("Gasto", "62900014 - Estacion de penitencia: otros gastos"),
+                    ("Gasto", "62900020 - Formacion"),
+                    ("Gasto", "62900021 - Juventud"),
+                    ("Gasto", "62900022 - Convivencias y actos sociales"),
+                    ("Gasto", "62900023 - Grupo joven y monaguillos"),
+                    ("Gasto", "62900030 - Material de oficina"),
+                    ("Gasto", "62900031 - Programa de gestion y web"),
+                    ("Gasto", "62900032 - Limpieza"),
+                    ("Gasto", "631 - Otros tributos"),
+                    ("Gasto", "640 - Sueldos y salarios"),
+                    ("Gasto", "642 - Seguridad Social a cargo de la entidad"),
+                    ("Gasto", "650 - Ayudas monetarias (obra social)"),
+                    ("Gasto", "65000000 - Bolsa de caridad"),
+                    ("Gasto", "65000001 - Economato y ayudas a familias"),
+                    ("Gasto", "65000002 - Aportacion a Caritas y otras entidades"),
+                    ("Gasto", "651 - Ayudas no monetarias"),
+                    ("Gasto", "653 - Colaboraciones y donativos entregados"),
+                    ("Gasto", "659 - Otras perdidas en gestion corriente"),
+                    ("Gasto", "662 - Intereses de deudas"),
+                    ("Gasto", "669 - Otros gastos financieros"),
+                    ("Gasto", "678 - Gastos excepcionales"),
+                    ("Gasto", "681 - Amortizacion del inmovilizado material"),
+                    # INGRESOS (Grupo 7: Cuentas de 3 cifras y Subcuentas de 8 cifras)
+                    ("Ingreso", "700 - Venta de articulos de hermandad"),
+                    ("Ingreso", "70000000 - Venta de articulos"),
+                    ("Ingreso", "705 - Prestacion de servicios"),
+                    ("Ingreso", "720 - Cuotas de hermanos"),
+                    ("Ingreso", "72000000 - Cuotas de hermanos"),
+                    ("Ingreso", "72000001 - Cuotas de altas"),
+                    ("Ingreso", "72000002 - Papeletas de sitio"),
+                    ("Ingreso", "721 - Cuotas extraordinarias"),
+                    ("Ingreso", "722 - Promociones para captacion de recursos"),
+                    ("Ingreso", "72200000 - Loteria de Navidad"),
+                    ("Ingreso", "72200001 - Rifas y sorteos"),
+                    ("Ingreso", "72200002 - Barra y convivencias"),
+                    ("Ingreso", "723 - Ingresos de patrocinadores y colaboraciones"),
+                    ("Ingreso", "728 - Donativos y limosnas"),
+                    ("Ingreso", "72800000 - Limosnas y cepillos"),
+                    ("Ingreso", "72800001 - Donativos de hermanos"),
+                    ("Ingreso", "72800002 - Donativos para caridad"),
+                    ("Ingreso", "740 - Subvenciones oficiales a la actividad"),
+                    ("Ingreso", "746 - Donaciones y legados a la actividad"),
+                    ("Ingreso", "752 - Ingresos por arrendamientos"),
+                    ("Ingreso", "759 - Ingresos por servicios diversos"),
+                    ("Ingreso", "769 - Otros ingresos financieros"),
+                    ("Ingreso", "778 - Ingresos excepcionales")
+                ]
+
     filas_detalle = list()
     filas_resumen_3 = list()
     estructura_jerarquica = {"Gasto": list(), "Ingreso": list()}
@@ -491,24 +546,25 @@ def generar_informe_arzobispado(df_global, dict_pres):
         partidas = obtener_partidas(tipo_op)
         subgrupos_temp = {c: {"p": 0.0, "r": 0.0, "hijos": list()} for c, _ in lista_g3}
         
-        for p in partidas:
+                for p in partidas:
             p_str = str(p).strip()
             partes = p_str.split(" - ", 1)
-            cod_8 = partes[0].strip() if len(partes) > 1 else p_str[:8].strip()
+            cod_part = partes[0].strip() if len(partes) > 1 else p_str[:8].strip()
             nom_sub = partes[1].strip() if len(partes) > 1 else p_str
-            cod_3 = cod_8[:3]
+            cod_3 = cod_part[:3]
             
             pres_v = float(dict_pres.get(p, 0.0))
             real_v = float(df_global.loc[(df_global['Tipo'] == tipo_op) & (df_global['Partida'] == p), 'Importe (€)'].sum()) if not df_global.empty else 0.0
             desv_v = real_v - pres_v
             pct_v = f"{(real_v / pres_v * 100):.1f}%" if pres_v > 0 else ("100.0%" if real_v > 0 else "0.0%")
             
-            filas_detalle.append({"Tipo": tipo_op.upper(), "Cuenta (8 dígitos)": cod_8, "Nombre Subcuenta": nom_sub, "Presupuesto (€)": pres_v, "Real (€)": real_v, "Desviación (€)": desv_v, "% Realizado": pct_v})
+            filas_detalle.append({"Tipo": tipo_op.upper(), "Cuenta": cod_part, "Nombre": nom_sub, "Presupuesto (€)": pres_v, "Real (€)": real_v, "Desviación (€)": desv_v, "% Realizado": pct_v})
             
             if cod_3 in subgrupos_temp:
                 subgrupos_temp[cod_3]["p"] += pres_v
                 subgrupos_temp[cod_3]["r"] += real_v
-                subgrupos_temp[cod_3]["hijos"].append((cod_8, nom_sub, pres_v, real_v, desv_v, pct_v))
+                if len(cod_part) > 3 or pres_v > 0 or real_v > 0:
+                    subgrupos_temp[cod_3]["hijos"].append((cod_part, nom_sub, pres_v, real_v, desv_v, pct_v))
                 
         tot_g_p, tot_g_r = 0.0, 0.0
         for c3, nom_g3 in lista_g3:
@@ -1014,13 +1070,26 @@ with p_pre:
             icono_t = "📈" if tipo_comp == "Ingreso" else "📉"
             st.markdown(f"##### {icono_t} Comparativa Presupuestado vs Ejecutado ({tipo_comp}s)")
             datos_comp = list()
-            for part in obtener_partidas(tipo_comp):
-                pres_v = float(dict_pres.get(part, 0.0))
-                ejec_v = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'] == part), 'Importe (€)'].sum()) if not df_global.empty else 0.0
+                        tot_p, tot_e = 0.0, 0.0
+            todas_partidas = obtener_partidas(tipo_comp)
+            for part in todas_partidas:
+                cod_p = str(part).split(" - ")[0].strip()
+                pres_directo = float(dict_pres.get(part, 0.0))
+                ejec_directo = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'] == part), 'Importe (€)'].sum()) if not df_global.empty else 0.0
+                tot_p += pres_directo
+                tot_e += ejec_directo
+                
+                if len(cod_p) == 3 and cod_p.isdigit():
+                    pres_v = sum(float(dict_pres.get(x, 0.0)) for x in todas_partidas if str(x).split(" - ")[0].strip().startswith(cod_p))
+                    ejec_v = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'].str.startswith(cod_p)), 'Importe (€)'].sum()) if not df_global.empty else 0.0
+                else:
+                    pres_v = pres_directo
+                    ejec_v = ejec_directo
+                    
                 dif_v = (ejec_v - pres_v) if tipo_comp == "Ingreso" else (pres_v - ejec_v)
                 datos_comp.append({"Partida": part, "Presupuestado (€)": pres_v, "Ejecutado (€)": ejec_v, "Diferencia (€)": dif_v})
             df_comp = pd.DataFrame(datos_comp)
-            tot_p = df_comp["Presupuestado (€)"].sum(); tot_e = df_comp["Ejecutado (€)"].sum(); tot_d = df_comp["Diferencia (€)"].sum()
+            tot_d = (tot_e - tot_p) if tipo_comp == "Ingreso" else (tot_p - tot_e)
             df_tot = pd.concat([df_comp, pd.DataFrame([{"Partida": f"TOTAL {tipo_comp.upper()}S", "Presupuestado (€)": tot_p, "Ejecutado (€)": tot_e, "Diferencia (€)": tot_d}])], ignore_index=True)
             tablas_tot[tipo_comp] = df_tot
             st.dataframe(df_tot, use_container_width=True, hide_index=True)
