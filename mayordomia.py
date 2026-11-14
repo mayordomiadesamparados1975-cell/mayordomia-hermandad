@@ -461,146 +461,151 @@ def generar_pdf_presupuesto_global(df_ing, df_gas):
     tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8))]], colWidths=(176, 176, 176)); tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')])); story.append(tf)
     doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical); buf.seek(0); return buf
 def generar_informe_arzobispado(df_global, dict_pres):
-    nombres_base_3 = {
-        "600": "Compras de mercaderias", "601": "Compra de loteria", "621": "Arrendamientos y canones",
-        "622": "Reparaciones y conservacion", "623": "Servicios de profesionales independientes",
-        "624": "Transportes", "625": "Primas de seguros", "626": "Servicios bancarios y similares",
-        "627": "Publicaciones, publicidad y propaganda", "628": "Suministros", "629": "Otros servicios",
-        "631": "Otros tributos", "640": "Sueldos y salarios", "642": "Seguridad Social a cargo de la entidad",
-        "650": "Ayudas monetarias (obra social)", "651": "Ayudas no monetarias",
-        "653": "Colaboraciones y donativos entregados", "659": "Otras perdidas en gestion corriente",
-        "662": "Intereses de deudas", "669": "Otros gastos financieros", "678": "Gastos excepcionales",
-        "681": "Amortizacion del inmovilizado material",
-        "700": "Venta de articulos de hermandad", "705": "Prestacion de servicios",
-        "720": "Cuotas de hermanos", "721": "Cuotas extraordinarias",
-        "722": "Promociones para captacion de recursos", "723": "Ingresos de patrocinadores y colaboraciones",
-        "728": "Donativos y limosnas", "740": "Subvenciones oficiales a la actividad",
-        "746": "Donaciones y legados a la actividad", "752": "Ingresos por arrendamientos",
-        "759": "Ingresos por servicios diversos", "769": "Otros ingresos financieros",
-        "778": "Ingresos excepcionales"
-    }
+    gastos_grupos = [
+        ("LH", "COMPRAS (para vender)"), ("MH", "GASTOS DE PERSONAL"), ("NH", "SUBSIDIO SACERDOTE (Estipendio)"),
+        ("OH", "GASTOS FINANCIEROS"), ("PH", "IMPUESTOS Y TASAS"), ("QH", "SUMINISTROS Y CONSERVACIÓN"),
+        ("RH", "SALIDA DE LA COFRADÍA"), ("SH", "GASTOS DE FUNCIONAMIENTO"), ("TH", "ACTIVIDADES PASTORALES Y ASIST"),
+        ("UH", "OTROS"), ("VH", "COMUNICACIÓN DE BIENES")
+    ]
+    ing_ord_grupos = [
+        ("AH", "POR SERVICIOS"), ("BH", "RENTAS DEL PATRIMONIO INMOB."), ("CH", "RENTAS DEL PATRIMONIO MOB."),
+        ("DH", "APORTACIÓN DE LOS FIELES"), ("EH", "DONATIVOS Y LIMOSNAS"), ("IH", "ACTIVIDADES ECONOMICAS")
+    ]
+    ing_no_ord_grupos = [
+        ("FH", "SUBVENCIONES"), ("GH", "OBRAS ASISTENCIALES"), ("HH", "OTROS INGRESOS")
+    ]
     
+    todos_codigos_2 = {c: n for c, n in (gastos_grupos + ing_ord_grupos + ing_no_ord_grupos)}
+    subgrupos_data = {c: {"p": 0.0, "r": 0.0, "hijos": list()} for c in todos_codigos_2}
     filas_detalle = list()
-    filas_resumen_3 = list()
-    estructura_jerarquica = {"Gasto": list(), "Ingreso": list()}
-    totales_bloque = {"Gasto": {"p": 0.0, "r": 0.0}, "Ingreso": {"p": 0.0, "r": 0.0}}
     
     for tipo_op in ["Gasto", "Ingreso"]:
-        partidas = obtener_partidas(tipo_op)
-        subgrupos_temp = dict()
-        
-        for p in partidas:
+        for p in obtener_partidas(tipo_op):
             p_str = str(p).strip()
             partes = p_str.split(" - ", 1)
-            cod_part = partes[0].strip() if len(partes) > 1 else p_str[:8].strip()
+            cod_part = partes[0].strip() if len(partes) > 1 else p_str[:3].strip()
             nom_sub = partes[1].strip() if len(partes) > 1 else p_str
-            cod_3 = cod_part[:3]
+            cod_2 = cod_part[:2].upper()
             
-            if cod_3 not in subgrupos_temp:
-                nom_padre = nombres_base_3.get(cod_3, nom_sub)
-                subgrupos_temp[cod_3] = {"nombre": nom_padre, "p": 0.0, "r": 0.0, "hijos": list()}
-            if len(cod_part) == 3 and cod_part.isdigit():
-                subgrupos_temp[cod_3]["nombre"] = nom_sub
-                
             pres_v = float(dict_pres.get(p, 0.0))
             real_v = float(df_global.loc[(df_global['Tipo'] == tipo_op) & (df_global['Partida'] == p), 'Importe (€)'].sum()) if not df_global.empty else 0.0
-            desv_v = real_v - pres_v
-            pct_v = f"{(real_v / pres_v * 100):.0f}%" if pres_v > 0 else ("100%" if real_v > 0 else "")
+            filas_detalle.append({"Tipo": tipo_op.upper(), "Grupo": cod_2, "Cuenta": cod_part, "Nombre": nom_sub, "Presupuesto (€)": pres_v, "Real (€)": real_v})
             
-            filas_detalle.append({"Tipo": tipo_op.upper(), "Cuenta": cod_part, "Nombre": nom_sub, "Presupuesto": pres_v, "Real": real_v, "Desviacion": desv_v, "% realizado": pct_v})
+            if cod_2 in subgrupos_data:
+                subgrupos_data[cod_2]["p"] += pres_v
+                subgrupos_data[cod_2]["r"] += real_v
+                if len(cod_part) > 2:
+                    subgrupos_data[cod_2]["hijos"].append((cod_part, nom_sub, real_v))
+
+    filas_resumen = list()
+    for sec_nom, lista_g in [("GASTOS", gastos_grupos), ("INGRESOS ORDINARIOS", ing_ord_grupos), ("INGRESOS NO ORDINARIOS", ing_no_ord_grupos)]:
+        for c2, nom2 in lista_g:
+            filas_resumen.append({"Bloque": sec_nom, "Código": c2, "Concepto Oficial": nom2, "Presupuesto (€)": subgrupos_data[c2]["p"], "Real (€)": subgrupos_data[c2]["r"]})
             
-            subgrupos_temp[cod_3]["p"] += pres_v
-            subgrupos_temp[cod_3]["r"] += real_v
-            if len(cod_part) > 3 or pres_v > 0 or real_v > 0:
-                subgrupos_temp[cod_3]["hijos"].append((cod_part, nom_sub, pres_v, real_v, desv_v, pct_v))
-                
-        tot_g_p, tot_g_r = 0.0, 0.0
-        for c3 in sorted(subgrupos_temp.keys()):
-            nom_g3 = subgrupos_temp[c3]["nombre"]
-            tp = subgrupos_temp[c3]["p"]; tr = subgrupos_temp[c3]["r"]; td = tr - tp
-            tot_g_p += tp; tot_g_r += tr
-            tpct = f"{(tr / tp * 100):.0f}%" if tp > 0 else ("100%" if tr > 0 else "")
-            filas_resumen_3.append({"Tipo": tipo_op.upper(), "Cuenta": c3, "Nombre": nom_g3, "Presupuesto": tp, "Real": tr, "Desviacion": td, "% realizado": tpct})
-            estructura_jerarquica[tipo_op].append((c3, nom_g3, tp, tr, td, tpct, subgrupos_temp[c3]["hijos"]))
-            
-        totales_bloque[tipo_op]["p"] = tot_g_p
-        totales_bloque[tipo_op]["r"] = tot_g_r
-        filas_resumen_3.append({"Tipo": f"TOTAL {tipo_op.upper()}S", "Cuenta": "", "Nombre": f"TOTAL {tipo_op.upper()}S", "Presupuesto": tot_g_p, "Real": tot_g_r, "Desviacion": tot_g_r - tot_g_p, "% realizado": ""})
-        df_det = pd.DataFrame(filas_detalle)
-    df_res3 = pd.DataFrame(filas_resumen_3)
+    df_res3 = pd.DataFrame(filas_resumen)
+    df_det = pd.DataFrame(filas_detalle)
     
     buf_ex = io.BytesIO()
     with pd.ExcelWriter(buf_ex, engine='openpyxl') as writer:
-        df_res3.to_excel(writer, index=False, sheet_name='Resumen_Grupos_3_Digitos')
-        df_det.to_excel(writer, index=False, sheet_name='Desglose_Subcuentas_8_Digitos')
+        df_res3.to_excel(writer, index=False, sheet_name='Resumen_Palacio_2_Letras')
+        df_det.to_excel(writer, index=False, sheet_name='Desglose_Subcuentas')
     buf_ex.seek(0)
-
-    def construir_pdf_arz(desarrollado=False):
+    def construir_pdf_palacio(desarrollado=False):
         b_pdf = io.BytesIO()
         doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=32, leftMargin=32, topMargin=28, bottomMargin=28)
-        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_suave = colors.HexColor("#F3F4F6")
+        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_suave = colors.HexColor("#E5E7EB")
         t_st = ParagraphStyle('T', parent=styles['Heading1'], fontSize=13, leading=16, alignment=1, textColor=burdeos)
-        s_st = ParagraphStyle('S', parent=styles['Normal'], fontSize=8.5, leading=11, alignment=1, textColor=colors.gray)
-        n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=7.8, leading=10)
-        n_der = ParagraphStyle('ND', parent=styles['Normal'], fontSize=7.8, leading=10, alignment=2)
-        sub_st = ParagraphStyle('Sub', parent=styles['Normal'], fontSize=7.4, leading=9.5, leftIndent=8, textColor=colors.HexColor("#374151"))
-        sub_der = ParagraphStyle('SubD', parent=styles['Normal'], fontSize=7.4, leading=9.5, alignment=2, textColor=colors.HexColor("#374151"))
+        n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=8, leading=10.5)
+        n_der = ParagraphStyle('ND', parent=styles['Normal'], fontSize=8, leading=10.5, alignment=2)
         
         if os.path.exists("escudo.png"):
-            try: img = RLImage("escudo.png", width=50, height=50); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 4))
+            try: img = RLImage("escudo.png", width=48, height=48); img.hAlign = 'CENTER'; story.append(img); story.append(Spacer(1, 4))
             except: pass
-        mod_txt = "DESARROLLADO POR SUBCUENTAS" if desarrollado else "AGRUPADO POR CUENTAS PRINCIPALES"
-        story.append(Paragraph(f"<b>Hermandad de Ntra. Sra. de los Desamparados - Ejercicio {date.today().year}</b>", t_st))
-        story.append(Paragraph(f"<b>RENDICIÓN DE CUENTAS — ARCHIDIÓCESIS DE SEVILLA ({mod_txt})</b>", ParagraphStyle('SubA', alignment=1, fontSize=9, textColor=burdeos)))
-        story.append(Paragraph(f"Fecha de emisión: {datetime.now().strftime('%d/%m/%Y')}", s_st)); story.append(Spacer(1, 10))
-        
-        t_datos = [[Paragraph("<b><font color='white'>Cuenta</font></b>", n_st), Paragraph("<b><font color='white'>Nombre</font></b>", n_st), Paragraph("<b><font color='white'>Presupuesto</font></b>", n_der), Paragraph("<b><font color='white'>Real</font></b>", n_der), Paragraph("<b><font color='white'>Desviación</font></b>", n_der), Paragraph("<b><font color='white'>% realizado</font></b>", n_der)]]
-        estilos_extra = list(); fila_idx = 1
-        
-        for tipo_op, titulo_bloque in [("Gasto", "GASTOS"), ("Ingreso", "INGRESOS")]:
-            t_datos.append(["", Paragraph(f"<b><font color='#800020'>{titulo_bloque}</font></b>", n_st), "", "", "", ""])
-            estilos_extra.append(('BACKGROUND', (0, fila_idx), (-1, fila_idx), colors.HexColor("#FDF2F2")))
-            fila_idx += 1
+        story.append(Paragraph("<b>ARCHIDIÓCESIS DE SEVILLA — PROTECTORADO CANÓNICO DE HH. Y CC.</b>", t_st))
+        story.append(Paragraph(f"<b>HERMANDAD DE NUESTRA SEÑORA DE LOS DESAMPARADOS — EJERCICIO {date.today().year}</b>", ParagraphStyle('SubA', alignment=1, fontSize=9.5, textColor=burdeos)))
+        story.append(Spacer(1, 8))
+
+        tot_gas = sum(subgrupos_data[c]["r"] for c, _ in gastos_grupos)
+        tot_ing_ord = sum(subgrupos_data[c]["r"] for c, _ in ing_ord_grupos)
+        tot_ing_no = sum(subgrupos_data[c]["r"] for c, _ in ing_no_ord_grupos)
+        tot_ing_gen = tot_ing_ord + tot_ing_no
+
+        if not desarrollado:
+            story.append(Paragraph("<b>RESUMEN DE CUENTAS ANUALES (MODELO PALACIO ARZOBISPAL)</b>", ParagraphStyle('R1', alignment=1, fontSize=10)))
+            story.append(Spacer(1, 8))
+            t_res = [[Paragraph("<b><font color='white'>Cód.</font></b>", n_st), Paragraph("<b><font color='white'>GASTOS</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der), Paragraph("<b><font color='white'>Cód.</font></b>", n_st), Paragraph("<b><font color='white'>INGRESOS</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der)]]
+            der_rows = [("---", "<b>INGRESOS ORDINARIOS</b>", "")] + [(c, n, f"{subgrupos_data[c]['r']:,.2f} €") for c, n in ing_ord_grupos] + [("", "<b>TOTAL INGRESOS ORDINARIOS</b>", f"<b>{tot_ing_ord:,.2f} €</b>"), ("---", "<b>INGRESOS NO ORDINARIOS</b>", "")] + [(c, n, f"{subgrupos_data[c]['r']:,.2f} €") for c, n in ing_no_ord_grupos] + [("", "<b>TOTAL INGRESOS NO ORDINARIOS</b>", f"<b>{tot_ing_no:,.2f} €</b>")]
+            izq_rows = [(c, n, f"{subgrupos_data[c]['r']:,.2f} €") for c, n in gastos_grupos] + [("", "<b>TOTAL GASTOS</b>", f"<b>{tot_gas:,.2f} €</b>")]
+            max_r = max(len(izq_rows), len(der_rows))
+            for i in range(max_r):
+                iz = izq_rows[i] if i < len(izq_rows) else ("", "", "")
+                de = der_rows[i] if i < len(der_rows) else ("", "", "")
+                t_res.append([Paragraph(f"<b>{iz[0]}</b>", n_st), Paragraph(iz[1], n_st), Paragraph(iz[2], n_der), Paragraph(f"<b>{de[0]}</b>", n_st), Paragraph(de[1], n_st), Paragraph(de[2], n_der)])
+            tr_tbl = RLTable(t_res, colWidths=(32, 165, 68, 32, 165, 68))
+            tr_tbl.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 4), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')]))
+            story.append(tr_tbl); story.append(Spacer(1, 12))
             
-            for c3, nom_g3, tp, tr, td, tpct, hijos in estructura_jerarquica[tipo_op]:
-                if desarrollado:
-                    for h_cod, h_nom, hp, hr, hd, hpct in hijos:
-                        if h_cod == c3:
-                            continue
-                        t_datos.append([Paragraph(h_cod, sub_st), Paragraph(h_nom, sub_st), Paragraph(f"{hp:,.2f}", sub_der), Paragraph(f"{hr:,.2f}", sub_der), Paragraph(f"{hd:,.2f}", sub_der), Paragraph(hpct, sub_der)])
-                        fila_idx += 1
-                    t_datos.append([Paragraph(f"<b>{c3}</b>", n_st), Paragraph(f"<b>{nom_g3}</b>", n_st), Paragraph(f"<b>{tp:,.2f}</b>", n_der), Paragraph(f"<b>{tr:,.2f}</b>", n_der), Paragraph(f"<b>{td:,.2f}</b>", n_der), Paragraph(f"<b>{tpct}</b>", n_der)])
-                    estilos_extra.append(('BACKGROUND', (0, fila_idx), (-1, fila_idx), gris_suave))
-                    fila_idx += 1
-                else:
-                    t_datos.append([Paragraph(f"<b>{c3}</b>", n_st), Paragraph(nom_g3, n_st), Paragraph(f"{tp:,.2f}", n_der), Paragraph(f"{tr:,.2f}", n_der), Paragraph(f"{td:,.2f}", n_der), Paragraph(tpct, n_der)])
-                    fila_idx += 1
-                    
-            bp = totales_bloque[tipo_op]["p"]; br = totales_bloque[tipo_op]["r"]; bd = br - bp
-            bpct = f"{(br / bp * 100):.0f}%" if bp > 0 else ("100%" if br > 0 else "")
-            t_datos.append(["", Paragraph(f"<b>TOTAL {titulo_bloque}</b>", n_st), Paragraph(f"<b>{bp:,.2f}</b>", n_der), Paragraph(f"<b>{br:,.2f}</b>", n_der), Paragraph(f"<b>{bd:,.2f}</b>", n_der), Paragraph(f"<b>{bpct}</b>", n_der)])
-            estilos_extra.append(('LINEABOVE', (0, fila_idx), (-1, fila_idx), 1.2, burdeos))
-            estilos_extra.append(('LINEBELOW', (0, fila_idx), (-1, fila_idx), 1.2, burdeos))
-            fila_idx += 1
-            
-        res_p = totales_bloque["Ingreso"]["p"] - totales_bloque["Gasto"]["p"]
-        res_r = totales_bloque["Ingreso"]["r"] - totales_bloque["Gasto"]["r"]
-        res_d = res_r - res_p
-        t_datos.append(["", Paragraph("<b>RESULTADO (ingresos - gastos)</b>", n_st), Paragraph(f"<b>{res_p:,.2f}</b>", n_der), Paragraph(f"<b>{res_r:,.2f}</b>", n_der), Paragraph(f"<b>{res_d:,.2f}</b>", n_der), ""])
-        estilos_extra.append(('BACKGROUND', (0, fila_idx), (-1, fila_idx), colors.HexColor("#FDF2F2")))
+            t_cuadre = [
+                [Paragraph("<b>Resultado del Ejercicio anterior (Saldos Iniciales Caja + Banco)</b>", n_st), Paragraph(f"<b>{(caja_ini + banco_ini):,.2f} €</b>", n_der)],
+                [Paragraph("<b>Total de ingresos (ordinarios + no ordinarios)</b>", n_st), Paragraph(f"<b>{tot_ing_gen:,.2f} €</b>", n_der)],
+                [Paragraph("<b>Total de gastos</b>", n_st), Paragraph(f"<b>{tot_gas:,.2f} €</b>", n_der)],
+                [Paragraph("<b>Resultado (resultado ejercicio anterior + total ingresos - total gastos)</b>", n_st), Paragraph(f"<b>{(caja_ini + banco_ini + tot_ing_gen - tot_gas):,.2f} €</b>", n_der)]
+            ]
+            tc_tbl = RLTable(t_cuadre, colWidths=(420, 110))
+            tc_tbl.setStyle(TableStyle([('GRID', (0,0), (-1,-1), 0.6, burdeos), ('BACKGROUND', (0,3), (-1,3), colors.HexColor("#FDF2F2")), ('PADDING', (0,0), (-1,-1), 5)]))
+            story.append(tc_tbl)
+        else:
+            for titulo_b, lista_b, tot_b in [("DESGLOSE DE GASTOS", gastos_grupos, tot_gas), ("DESGLOSE DE INGRESOS ORDINARIOS", ing_ord_grupos, tot_ing_ord), ("DESGLOSE DE INGRESOS NO ORDINARIOS", ing_no_ord_grupos, tot_ing_no)]:
+                story.append(Paragraph(f"<b>{titulo_b}</b>", ParagraphStyle('B1', fontSize=9.5, textColor=burdeos)))
+                story.append(Spacer(1, 4))
+                t_des = [[Paragraph("<b><font color='white'>Cód.</font></b>", n_st), Paragraph("<b><font color='white'>Concepto / Subcuenta</font></b>", n_st), Paragraph("<b><font color='white'>Subcuenta</font></b>", n_der), Paragraph("<b><font color='white'>Total Grupo</font></b>", n_der)]]
+                est_d = list(); r_i = 1
+                for c2, nom2 in lista_b:
+                    t_des.append([Paragraph(f"<b>{c2}</b>", n_st), Paragraph(f"<b>{c2} - {nom2}</b>", n_st), "", Paragraph(f"<b>{subgrupos_data[c2]['r']:,.2f} €</b>", n_der)])
+                    est_d.append(('BACKGROUND', (0, r_i), (-1, r_i), gris_suave))
+                    r_i += 1
+                    for hc, hn, hv in subgrupos_data[c2]["hijos"]:
+                        t_des.append([Paragraph(hc, n_st), Paragraph(hn, n_st), Paragraph(f"{hv:,.2f} €", n_der), ""])
+                        r_i += 1
+                t_des.append(["", Paragraph(f"<b>TOTAL {titulo_b.replace('DESGLOSE DE ', '')}</b>", n_st), "", Paragraph(f"<b>{tot_b:,.2f} €</b>", n_der)])
+                est_d.append(('BACKGROUND', (0, r_i), (-1, r_i), colors.HexColor("#FDF2F2")))
+                td_tbl = RLTable(t_des, colWidths=(45, 335, 75, 75))
+                td_tbl.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.4, colors.grey), ('PADDING', (0,0), (-1,-1), 3.5)] + est_d))
+                story.append(td_tbl); story.append(Spacer(1, 10))
+
+        story.append(PageBreak())
+        story.append(Paragraph(f"<b>ESTADO FINANCIERO AL 31 DE DICIEMBRE DE {date.today().year}</b>", t_st))
+        story.append(Spacer(1, 12))
+        pend_cobrar = float(df_global.loc[(df_global['Tipo'] == 'Ingreso') & (df_global['Pendiente'] == 1), 'Importe (€)'].sum()) if not df_global.empty else 0.0
+        pend_pagar = float(df_global.loc[(df_global['Tipo'] == 'Gasto') & (df_global['Pendiente'] == 1), 'Importe (€)'].sum()) if not df_global.empty else 0.0
         
-        t = RLTable(t_datos, colWidths=(68, 224, 65, 65, 65, 45))
-        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('PADDING', (0,0), (-1,-1), 3.2), ('GRID', (0,0), (-1,-1), 0.4, colors.grey), ('VALIGN', (0,0), (-1,-1), 'MIDDLE')] + estilos_extra))
-        story.append(t); story.append(Spacer(1, 28))
+        t_ef = [
+            [Paragraph("<b><font color='white'>ACTIVO / TESORERÍA</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der), Paragraph("<b><font color='white'>PASIVO / DEUDAS</font></b>", n_st), Paragraph("<b><font color='white'>Importe</font></b>", n_der)],
+            [Paragraph("Saldo en Caja", n_st), Paragraph(f"{s_caja:,.2f} €", n_der), Paragraph("Préstamos recibidos", n_st), Paragraph("0,00 €", n_der)],
+            [Paragraph("Saldo en Banco", n_st), Paragraph(f"{s_banco:,.2f} €", n_der), Paragraph("Cuentas Pendientes de pagar", n_st), Paragraph(f"{pend_pagar:,.2f} €", n_der)],
+            [Paragraph("Depósitos e IPF", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con Seguridad Social", n_st), Paragraph("0,00 €", n_der)],
+            [Paragraph("Inversiones en Fondos Públicos", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con la Agencia Tributaria", n_st), Paragraph("0,00 €", n_der)],
+            [Paragraph("Inversiones en Bolsa de Valores", n_st), Paragraph("0,00 €", n_der), Paragraph("Deuda con otras entidades públicas", n_st), Paragraph("0,00 €", n_der)],
+            [Paragraph("Cuentas pendientes de cobrar", n_st), Paragraph(f"{pend_cobrar:,.2f} €", n_der), "", ""],
+            [Paragraph("Préstamos concedidos", n_st), Paragraph("0,00 €", n_der), "", ""]
+        ]
+        tef_tbl = RLTable(t_ef, colWidths=(185, 80, 185, 80))
+        tef_tbl.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), burdeos), ('GRID', (0,0), (-1,-1), 0.5, colors.grey), ('PADDING', (0,0), (-1,-1), 6)]))
+        story.append(tef_tbl); story.append(Spacer(1, 45))
         
-        tf = RLTable([[Paragraph("<b>___________________________</b><br/>Vº Bº El Hermano Mayor", ParagraphStyle('F1', alignment=1, fontSize=8.5)), Paragraph("<b>___________________________</b><br/>El Mayordomo", ParagraphStyle('F2', alignment=1, fontSize=8.5)), Paragraph("<b>___________________________</b><br/>El Secretario", ParagraphStyle('F3', alignment=1, fontSize=8.5))]], colWidths=(177, 177, 177))
+        tf = RLTable([[Paragraph("<b>Mayordomo</b><br/><br/><br/>Fdo: _________________________", ParagraphStyle('F1', alignment=1, fontSize=9)), Paragraph("<b>Hermano Mayor</b><br/><br/><br/>Fdo: _________________________", ParagraphStyle('F2', alignment=1, fontSize=9))]], colWidths=(265, 265))
         tf.setStyle(TableStyle([('ALIGN', (0,0), (-1,-1), 'CENTER')]))
-        story.append(tf)
+        story.append(tf); story.append(Spacer(1, 30))
+        story.append(Paragraph("Sello de la Hermandad<br/><br/>En Sevilla, a _____ de ___________________ de 20____.", ParagraphStyle('Sel', alignment=1, fontSize=9)))
+        story.append(Spacer(1, 20))
+        story.append(Paragraph("<b>Delegado Episcopal Asuntos Jurídicos HH y CC — Protectorado Canónico de la Archidiócesis de Sevilla</b>", ParagraphStyle('Pie', alignment=1, fontSize=8, textColor=colors.gray)))
+        
         doc.build(story, onFirstPage=marca_agua_vertical, onLaterPages=marca_agua_vertical)
         b_pdf.seek(0)
         return b_pdf
 
-    return df_res3, df_det, buf_ex, construir_pdf_arz(desarrollado=False), construir_pdf_arz(desarrollado=True)
+    return df_res3, df_det, buf_ex, construir_pdf_palacio(desarrollado=False), construir_pdf_palacio(desarrollado=True)
+
 def dibujar_tabla_movimientos(df_f):
     total_regs = len(df_f)
     por_pagina = 25
@@ -1024,14 +1029,14 @@ with p_pre:
             tot_p, tot_e = 0.0, 0.0
             todas_partidas = obtener_partidas(tipo_comp)
             for part in todas_partidas:
-                cod_p = str(part).split(" - ")[0].strip()
+                cod_p = str(part).split(" - ").strip()
                 pres_directo = float(dict_pres.get(part, 0.0))
                 ejec_directo = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'] == part), 'Importe (€)'].sum()) if not df_global.empty else 0.0
                 tot_p += pres_directo
                 tot_e += ejec_directo
 
-                if len(cod_p) == 3 and cod_p.isdigit():
-                    pres_v = sum(float(dict_pres.get(x, 0.0)) for x in todas_partidas if str(x).split(" - ")[0].strip().startswith(cod_p))
+                if len(cod_p) == 2 and cod_p.isalpha():
+                    pres_v = sum(float(dict_pres.get(x, 0.0)) for x in todas_partidas if str(x).split(" - ").strip().startswith(cod_p))
                     ejec_v = float(df_global.loc[(df_global['Tipo'] == tipo_comp) & (df_global['Partida'].str.startswith(cod_p)), 'Importe (€)'].sum()) if not df_global.empty else 0.0
                 else:
                     pres_v = pres_directo
@@ -1039,6 +1044,7 @@ with p_pre:
 
                 dif_v = (ejec_v - pres_v) if tipo_comp == "Ingreso" else (pres_v - ejec_v)
                 datos_comp.append({"Partida": part, "Presupuestado (€)": pres_v, "Ejecutado (€)": ejec_v, "Diferencia (€)": dif_v})
+            
             df_comp = pd.DataFrame(datos_comp)
             tot_d = (tot_e - tot_p) if tipo_comp == "Ingreso" else (tot_p - tot_e)
             df_tot = pd.concat([df_comp, pd.DataFrame([{"Partida": f"TOTAL {tipo_comp.upper()}S", "Presupuestado (€)": tot_p, "Ejecutado (€)": tot_e, "Diferencia (€)": tot_d}])], ignore_index=True)
@@ -1082,80 +1088,110 @@ with p_con:
         mostrar_panel_respaldos(df_global)
     with col_c2:
         st.markdown("**🎨 Crear Nuevas Partidas / Conceptos**")
-        with st.expander("⛪ Cargar Plan Contable Oficial Arzobispado de Sevilla (8 dígitos)", expanded=False):
-            st.caption("Carga todas las subcuentas oficiales de 8 dígitos del Arzobispado de Sevilla para cuadrar con los grupos de 3 dígitos.")
-            if st.button("📥 Cargar Catálogo Oficial Arzobispado", use_container_width=True, key="btn_plan_sevilla"):
-                plan_arzobispado = [
-                    ("Gasto", "60000000 - Compras de mercaderias"),
-                    ("Gasto", "60100000 - Compra de loteria"),
-                    ("Gasto", "62100000 - Arrendamientos y canones"),
-                    ("Gasto", "62200000 - Reparaciones y conservacion"),
-                    ("Gasto", "62300000 - Servicios de profesionales independientes"),
-                    ("Gasto", "62400000 - Transportes"),
-                    ("Gasto", "62500000 - Primas de seguros"),
-                    ("Gasto", "62600000 - Servicios bancarios y similares"),
-                    ("Gasto", "62700000 - Boletin de la hermandad"),
-                    ("Gasto", "62700001 - Carteles y convocatorias"),
-                    ("Gasto", "62800000 - Casa de hermandad: luz"),
-                    ("Gasto", "62800001 - Casa de hermandad: agua"),
-                    ("Gasto", "62800002 - Casa de hermandad: telefono e internet"),
-                    ("Gasto", "62900000 - Culto: cera"),
-                    ("Gasto", "62900001 - Culto: flores y exorno"),
-                    ("Gasto", "62900002 - Culto: musica y capillas"),
-                    ("Gasto", "62900003 - Culto: predicadores y celebraciones"),
-                    ("Gasto", "62900004 - Culto: imprenta y estampas"),
-                    ("Gasto", "62900005 - Culto: otros gastos"),
-                    ("Gasto", "62900010 - Estacion de penitencia: costaleros"),
-                    ("Gasto", "62900011 - Estacion de penitencia: bandas"),
-                    ("Gasto", "62900012 - Estacion de penitencia: montaje de pasos"),
-                    ("Gasto", "62900013 - Estacion de penitencia: seguros y permisos"),
-                    ("Gasto", "62900014 - Estacion de penitencia: otros gastos"),
-                    ("Gasto", "62900020 - Formacion"),
-                    ("Gasto", "62900021 - Juventud"),
-                    ("Gasto", "62900022 - Convivencias y actos sociales"),
-                    ("Gasto", "62900023 - Grupo joven y monaguillos"),
-                    ("Gasto", "62900030 - Material de oficina"),
-                    ("Gasto", "62900031 - Programa de gestion y web"),
-                    ("Gasto", "62900032 - Limpieza"),
-                    ("Gasto", "63100000 - Otros tributos"),
-                    ("Gasto", "64000000 - Sueldos y salarios"),
-                    ("Gasto", "64200000 - Seguridad Social a cargo de la entidad"),
-                    ("Gasto", "65000000 - Bolsa de caridad"),
-                    ("Gasto", "65000001 - Economato y ayudas a familias"),
-                    ("Gasto", "65000002 - Aportacion a Caritas y otras entidades"),
-                    ("Gasto", "65100000 - Ayudas no monetarias"),
-                    ("Gasto", "65300000 - Colaboraciones y donativos entregados"),
-                    ("Gasto", "65900000 - Otras perdidas en gestion corriente"),
-                    ("Gasto", "66200000 - Intereses de deudas"),
-                    ("Gasto", "66900000 - Otros gastos financieros"),
-                    ("Gasto", "67800000 - Gastos excepcionales"),
-                    ("Gasto", "68100000 - Amortizacion del inmovilizado material"),
-                    ("Ingreso", "70000000 - Venta de articulos de hermandad"),
-                    ("Ingreso", "70500000 - Prestacion de servicios"),
-                    ("Ingreso", "72000000 - Cuotas de hermanos"),
-                    ("Ingreso", "72000001 - Cuotas de altas"),
-                    ("Ingreso", "72000002 - Papeletas de sitio"),
-                    ("Ingreso", "72100000 - Cuotas extraordinarias"),
-                    ("Ingreso", "72200000 - Loteria de Navidad"),
-                    ("Ingreso", "72200001 - Rifas y sorteos"),
-                    ("Ingreso", "72200002 - Barra y convivencias"),
-                    ("Ingreso", "72300000 - Ingresos de patrocinadores y colaboraciones"),
-                    ("Ingreso", "72800000 - Limosnas y cepillos"),
-                    ("Ingreso", "72800001 - Donativos de hermanos"),
-                    ("Ingreso", "72800002 - Donativos para caridad"),
-                    ("Ingreso", "74000000 - Subvenciones oficiales a la actividad"),
-                    ("Ingreso", "74600000 - Donaciones y legados a la actividad"),
-                    ("Ingreso", "75200000 - Ingresos por arrendamientos"),
-                    ("Ingreso", "75900000 - Ingresos por servicios diversos"),
-                    ("Ingreso", "76900000 - Otros ingresos financieros"),
-                    ("Ingreso", "77800000 - Ingresos excepcionales")
+        with st.expander("⛪ Cargar Plan Oficial Archidiócesis de Sevilla (Letras AH - VH)", expanded=False):
+            st.caption("Carga los grupos principales (2 letras) y todas las subcuentas oficiales exigidas por Palacio Arzobispal.")
+            if st.button("📥 Cargar Catálogo Oficial Palacio (Letras)", use_container_width=True, key="btn_plan_sevilla"):
+                plan_palacio = [
+                    # GASTOS (LH a VH)
+                    ("Gasto", "LH - COMPRAS (para vender)"),
+                    ("Gasto", "LH1 - Velones, velas, lamparillas, medallas, etc."),
+                    ("Gasto", "LH2 - Publicaciones: folletos, libros, etc."),
+                    ("Gasto", "LH3 - Otros (Compras)"),
+                    ("Gasto", "MH - GASTOS DE PERSONAL"),
+                    ("Gasto", "MH1 - Personal seglar habitual"),
+                    ("Gasto", "MH2 - Seguridad Social del personal seglar"),
+                    ("Gasto", "MH3 - Suplencias del personal seglar habitual"),
+                    ("Gasto", "MH4 - Desplazamientos"),
+                    ("Gasto", "MH5 - Cobranza"),
+                    ("Gasto", "MH6 - Costaleros"),
+                    ("Gasto", "NH - SUBSIDIO DEL SACERDOTE"),
+                    ("Gasto", "NH1 - Subsidio del Sacerdote (Estipendio)"),
+                    ("Gasto", "OH - GASTOS FINANCIEROS"),
+                    ("Gasto", "OH1 - Intereses de préstamos recibidos"),
+                    ("Gasto", "OH2 - Comisiones bancarias"),
+                    ("Gasto", "OH3 - Otros gastos financieros"),
+                    ("Gasto", "PH - IMPUESTOS Y TASAS"),
+                    ("Gasto", "PH1 - De organismos estatales / autonómicos"),
+                    ("Gasto", "PH2 - De organismos locales: Ayuntamiento, etc."),
+                    ("Gasto", "PH3 - Otros impuestos o Tasas"),
+                    ("Gasto", "QH - SUMINISTROS Y CONSERVACIÓN"),
+                    ("Gasto", "QH1 - Agua, gas, electricidad"),
+                    ("Gasto", "QH2 - Material de limpieza"),
+                    ("Gasto", "QH3 - Reparaciones: obras en inmuebles y locales"),
+                    ("Gasto", "QH4 - Asistencia técnica maquinaria: servicios y reparaciones"),
+                    ("Gasto", "QH5 - Seguros: responsabilidad civil, multierriesgo, accidente y similares"),
+                    ("Gasto", "QH6 - Cuotas alquiler de arrendamientos"),
+                    ("Gasto", "QH7 - Portes mercancías"),
+                    ("Gasto", "QH8 - Mantenimiento: Pasos, enseres..."),
+                    ("Gasto", "QH9 - Otros suministros y conservación"),
+                    ("Gasto", "RH - SALIDA DE LA COFRADÍA"),
+                    ("Gasto", "RH1 - Cera"),
+                    ("Gasto", "RH2 - Música"),
+                    ("Gasto", "RH3 - Flores"),
+                    ("Gasto", "RH4 - Otros gastos salida"),
+                    ("Gasto", "RH5 - Salidas Extraordinarias de la Cofradía"),
+                    ("Gasto", "SH - GASTOS DE FUNCIONAMIENTO"),
+                    ("Gasto", "SH1 - Material de oficina: papelería, impresos oficiales, etc."),
+                    ("Gasto", "SH2 - Correos y teléfono"),
+                    ("Gasto", "SH3 - Atenciones a personas ajenas (no de caridad)"),
+                    ("Gasto", "SH4 - Material de publicidad o propaganda"),
+                    ("Gasto", "SH5 - Actos jurídicos: abogados, notarios, etc."),
+                    ("Gasto", "TH - ACTIVIDADES PASTORALES Y ASISTENCIALES"),
+                    ("Gasto", "TH1 - Material para culto: hostias, vino, cera, libros litúrgicos..."),
+                    ("Gasto", "TH2 - Actividades de evangelización: catequesis y cultos"),
+                    ("Gasto", "TH3 - Actividades asistenciales sociales (Bolsa de Caridad)"),
+                    ("Gasto", "TH4 - Actividades culturales: conferencias, cursillos, etc."),
+                    ("Gasto", "TH5 - Actividades Pastorales extraordinarias"),
+                    ("Gasto", "TH6 - Obras asistenciales extraordinarias"),
+                    ("Gasto", "UH - OTROS"),
+                    ("Gasto", "UH1 - Obras extraordinarias"),
+                    ("Gasto", "UH2 - Otros gastos: compra de mobiliario, etc."),
+                    ("Gasto", "UH3 - Amortizaciones"),
+                    ("Gasto", "UH4 - Provisiones"),
+                    ("Gasto", "UH5 - Cuotas Incobrables"),
+                    ("Gasto", "VH - COMUNICACIÓN DE BIENES"),
+                    ("Gasto", "VH1 - Fondo Común Diocesano"),
+                    ("Gasto", "VH2 - Cuotas a entidades diocesanas (Seminario, Casa Sacerdotal...)"),
+                    ("Gasto", "VH3 - Ayudas a parroquias"),
+                    ("Gasto", "VH4 - Ayudas a entidades extradiocesanas (Conventos, Manos Unidas, OMP...)"),
+                    # INGRESOS (AH a IH)
+                    ("Ingreso", "AH - POR SERVICIOS"),
+                    ("Ingreso", "AH1 - Venta de cera y objetos religiosos, fotos, medallas, etc."),
+                    ("Ingreso", "AH2 - Venta libros, publicaciones"),
+                    ("Ingreso", "AH3 - Otros Ingresos por Servicios"),
+                    ("Ingreso", "AH4 - Subvención Consejo Cofradías"),
+                    ("Ingreso", "BH - RENTAS DEL PATRIMONIO INMOBILIARIO"),
+                    ("Ingreso", "BH1 - Rentas de fincas, locales, etc."),
+                    ("Ingreso", "CH - RENTAS DEL PATRIMONIO MOBILIARIO"),
+                    ("Ingreso", "CH1 - Intereses de inversiones: acciones, IPF, etc."),
+                    ("Ingreso", "CH2 - Intereses de cuentas en Bancos o Cajas"),
+                    ("Ingreso", "CH3 - Intereses de préstamos concedidos"),
+                    ("Ingreso", "DH - APORTACIÓN DE LOS FIELES"),
+                    ("Ingreso", "DH1 - Cuota de Hermanos"),
+                    ("Ingreso", "DH2 - Papeleta de Sitio"),
+                    ("Ingreso", "EH - DONATIVOS Y LIMOSNAS"),
+                    ("Ingreso", "EH1 - Cepillos"),
+                    ("Ingreso", "EH2 - Otros donativos sin finalidad específica"),
+                    ("Ingreso", "EH3 - Rifas, lotería y otros"),
+                    ("Ingreso", "EH4 - Recibido con ocasión de Sacramentos y Sacramentales"),
+                    ("Ingreso", "IH - ACTIVIDADES ECONOMICAS"),
+                    ("Ingreso", "IH1 - Cuotas de museos, exposiciones artísticas"),
+                    ("Ingreso", "IH2 - Otros ingresos de actividades económicas"),
+                    ("Ingreso", "FH - SUBVENCIONES"),
+                    ("Ingreso", "FH1 - De entidades no oficiales: Bancos, otras"),
+                    ("Ingreso", "FH2 - De entidades oficiales: Estado, Autonomía, Locales"),
+                    ("Ingreso", "GH - OBRAS ASISTENCIALES"),
+                    ("Ingreso", "GH1 - OBRAS ASISTENCIALES: caridad o promoción (NO CÁRITAS)"),
+                    ("Ingreso", "HH - OTROS INGRESOS"),
+                    ("Ingreso", "HH1 - Donativos y cuotas con destino determinado"),
+                    ("Ingreso", "HH2 - Colectas para casos parroquiales extraordinarios")
                 ]
                 conn = conectar_bd(); cur = conn.cursor()
-                for t_s, n_s in plan_arzobispado:
+                for t_s, n_s in plan_palacio:
                     cur.execute("INSERT OR IGNORE INTO partidas_personalizadas (tipo, nombre) VALUES (?, ?)", (t_s, n_s))
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
-                st.success("Catálogo oficial de 8 dígitos del Arzobispado cargado."); st.rerun()
+                st.success("Catálogo oficial con letras (AH - VH) cargado."); st.rerun()
 
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
         c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: 72200003 - Venta de dulces")
