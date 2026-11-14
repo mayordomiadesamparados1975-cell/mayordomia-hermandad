@@ -1192,7 +1192,21 @@ with p_con:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("Catálogo oficial con letras (AH - VH) cargado."); st.rerun()
-
+            st.markdown("---")
+            if st.button("🧹 Limpiar Partidas Antiguas (Numéricas / Iniciales)", use_container_width=True, key="btn_limpiar_antiguas"):
+                codigos_validos = ("AH", "BH", "CH", "DH", "EH", "FH", "GH", "HH", "IH", "LH", "MH", "NH", "OH", "PH", "QH", "RH", "SH", "TH", "UH", "VH")
+                df_todas_p = leer_tabla_turso("SELECT id, nombre FROM partidas_personalizadas")
+                if not df_todas_p.empty:
+                    conn = conectar_bd(); cur = conn.cursor()
+                    borradas = 0
+                    for _, rp in df_todas_p.iterrows():
+                        nom_p = str(rp.get('nombre', '')).strip()
+                        if not nom_p.startswith(codigos_validos):
+                            cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (int(rp.get('id')),))
+                            borradas += 1
+                    conn.commit(); conn.sync()
+                    st.cache_data.clear()
+                    st.success(f"Se han eliminado {borradas} partidas antiguas."); st.rerun()
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
         c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: 72200003 - Venta de dulces")
         if st.button("Guardar Nueva Partida", use_container_width=True):
