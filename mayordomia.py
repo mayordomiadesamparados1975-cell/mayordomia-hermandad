@@ -901,6 +901,52 @@ with p_reg:
                 st.success("Asiento grabado en la nube."); st.rerun()
 
     st.markdown("---")
+    with st.expander("🍻 Cierre Rápido de Ambigú 'Taskilla Sixtina' (Asiento Automático del Día)", expanded=False):
+        st.caption("Introduce los totales del cuadro inferior de tu hoja de arqueo de la Taskilla Sixtina para asentarlos automáticamente en un clic.")
+        ct1, ct2 = st.columns(2)
+        with ct1:
+            tsk_acto = st.text_input("Acto / Día de apertura:", placeholder="Ej: Cabildo General / Ensayo Costaleros", key="tsk_acto")
+            tsk_efectivo = st.number_input("Total cobrado en EFECTIVO (€):", min_value=0.0, step=5.0, format="%.2f", key="tsk_efec")
+            tsk_tarjeta = st.number_input("Total cobrado por TARJETA / TPV (€):", min_value=0.0, step=5.0, format="%.2f", key="tsk_tarj")
+        with ct2:
+            p_ing_disp = obtener_partidas("Ingreso")
+            idx_tsk_i = next((i for i, p in enumerate(p_ing_disp) if p.startswith("IH2") or p.startswith("EH3")), 0)
+            tsk_part_ing = st.selectbox("Partida oficial para Ingresos Ambigú:", p_ing_disp, index=idx_tsk_i, key="tsk_pi")
+            tsk_gastos = st.number_input("Gastos menores pagados de caja (€) (Hielo, pan...):", min_value=0.0, step=1.0, format="%.2f", key="tsk_gas")
+            p_gas_disp = obtener_partidas("Gasto")
+            idx_tsk_g = next((i for i, p in enumerate(p_gas_disp) if p.startswith("LH1") or p.startswith("SH")), 0)
+            tsk_part_gas = st.selectbox("Partida oficial para Gastos Menores:", p_gas_disp, index=idx_tsk_g, key="tsk_pg")
+            
+        tsk_foto = st.file_uploader("📸 Adjuntar foto de la Hoja de Arqueo rellena (Opcional):", type=["png", "jpg", "jpeg", "pdf"], key="tsk_foto")
+        
+        bloqueo_tsk = comprobar_bloqueo_concurrencia(quien_opera)
+        if bloqueo_tsk:
+            st.warning(bloqueo_tsk)
+            st.button("🔒 GUARDADO DESACTIVADO TEMPORALMENTE", disabled=True, use_container_width=True, key="tsk_lock")
+        else:
+            if st.button("✅ ASENTAR CIERRE DE TASKILLA SIXTINA AHORA", use_container_width=True, key="btn_save_tsk"):
+                if tsk_efectivo == 0 and tsk_tarjeta == 0 and tsk_gastos == 0:
+                    st.error("Introduce al menos un importe en Efectivo, Tarjeta o Gastos menores.")
+                else:
+                    registrar_presencia_usuario(quien_opera, "Cierre Taskilla Sixtina")
+                    f_ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    desc_acto = tsk_acto.strip() if tsk_acto.strip() else datetime.now().strftime("%d/%m/%Y")
+                    n_arc = ""
+                    if tsk_foto is not None:
+                        n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{tsk_foto.name}"
+                        guardar_archivo_nube(n_arc, tsk_foto.getbuffer())
+                    
+                    conn = conectar_bd(); cur = conn.cursor()
+                    if tsk_efectivo > 0:
+                        cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, num_factura, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, 'Ingreso', 'Caja', ?, 'Ambigú Taskilla Sixtina', '', ?, 'Efectivo', ?, ?, 0, 0)", (f_ahora, tsk_part_ing, f"Recaudación Efectivo Taskilla Sixtina ({desc_acto})", tsk_efectivo, n_arc))
+                    if tsk_tarjeta > 0:
+                        cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, num_factura, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, 'Ingreso', 'Banco', ?, 'Ambigú Taskilla Sixtina', '', ?, 'Tarjeta / TPV Físico', ?, ?, 0, 0)", (f_ahora, tsk_part_ing, f"Recaudación Tarjeta/TPV Taskilla Sixtina ({desc_acto})", tsk_tarjeta, n_arc))
+                    if tsk_gastos > 0:
+                        cur.execute("INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, num_factura, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, 'Gasto', 'Caja', ?, 'Ambigú Taskilla Sixtina', '', ?, 'Efectivo', ?, ?, 0, 0)", (f_ahora, tsk_part_gas, f"Gastos menores barra Taskilla Sixtina ({desc_acto})", tsk_gastos, n_arc))
+                    
+                    conn.commit(); conn.sync()
+                    st.cache_data.clear()
+                    st.success("¡Cierre de la Taskilla Sixtina asentado automáticamente en Caja y Banco!"); st.rerun()
     with st.expander("🏦 Importar Remesa de Cuotas desde Excel del Banco (.xlsx / .xls)", expanded=False):
         st.caption("Sube el archivo Excel exportado por tu banco para registrar automáticamente cada hermano junto con su cuota abonada en la cuenta Banco.")
         df_plantilla = pd.DataFrame([
