@@ -83,6 +83,15 @@ def comprobar_bloqueo_concurrencia(usuario_actual):
     except: pass
     return None
 
+class TursoCursor:
+    def execute(self, sql, params=()): ejecutar_turso_http(sql, params); return self
+    def fetchone(self): return None
+    def fetchall(self): return []
+
+class TursoConn:
+    def cursor(self): return TursoCursor()
+    def commit(self): pass
+    def sync(self): pass
 
 def conectar_bd():
     conn = TursoConn()
