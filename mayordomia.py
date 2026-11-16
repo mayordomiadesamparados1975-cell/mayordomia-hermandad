@@ -19,7 +19,7 @@ if "autenticado" not in st.session_state:
 if not st.session_state.autenticado:
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.image("escudo.png", width=150)
+        st.image("escudo.png", width=250)
         st.title("Hermandad de Nuestra Señora de los Desamparados")
         st.subheader("Acceso Mayordomía")
         clave = st.text_input("Contraseña de acceso", type="password")
