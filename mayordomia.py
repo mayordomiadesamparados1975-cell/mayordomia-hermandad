@@ -65,6 +65,7 @@ def registrar_presencia_usuario(usuario, accion):
         conn.commit(); conn.sync()
     except: pass
 
+@st.cache_data(ttl=15, show_spinner=False)
 def comprobar_bloqueo_concurrencia(usuario_actual):
     try:
         cols, rows = ejecutar_turso_http("SELECT clave, valor FROM config_sistema WHERE clave IN ('ultimo_uso', 'sesion_mayordomo_activa')")
@@ -1193,18 +1194,23 @@ with p_pre:
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
         st.markdown("---")
         with st.expander("⛪ Informe Oficial Palacio Arzobispal (Grupos 2 letras y Subcuentas)", expanded=False):
-            df_r3, df_d8, excel_arz, pdf_arz_agrupado, pdf_arz_desarrollado = generar_informe_arzobispado(df_global, dict_pres)
-            cp_arz1, cp_arz2, cp_arz3 = st.columns(3)
-            with cp_arz1:
-                st.download_button(label="📄 PDF Agrupado (Grupos 2 letras)", data=pdf_arz_agrupado, file_name=f"Palacio_Arzobispal_Agrupado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
-            with cp_arz2:
-                st.download_button(label="📑 PDF Desarrollado (Grupos y Subcuentas)", data=pdf_arz_desarrollado, file_name=f"Palacio_Arzobispal_Desarrollado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
-            with cp_arz3:
-                st.download_button(label="📊 Excel Oficial Palacio (Letras)", data=excel_arz, file_name=f"Cuentas_Palacio_Arzobispal_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-            st.markdown("**1. Resumen Oficial Agrupado por Grupos Principales (2 letras):**")
-            st.dataframe(df_r3, use_container_width=True, hide_index=True)
-            st.markdown("**2. Desglose Específico por Subcuentas (2 letras + número):**")
-            st.dataframe(df_d8, use_container_width=True, hide_index=True)
+            if st.button("🔄 Calcular y Preparar Informes Oficiales Palacio Arzobispal", use_container_width=True, key="btn_prep_palacio"):
+                df_r3, df_d8, excel_arz, pdf_arz_agrupado, pdf_arz_desarrollado = generar_informe_arzobispado(df_global, dict_pres)
+                st.session_state["palacio_listo"] = (df_r3, df_d8, excel_arz.getvalue(), pdf_arz_agrupado.getvalue(), pdf_arz_desarrollado.getvalue())
+            if "palacio_listo" in st.session_state:
+                df_r3, df_d8, ex_bytes, pdf_ag_bytes, pdf_de_bytes = st.session_state["palacio_listo"]
+                cp_arz1, cp_arz2, cp_arz3 = st.columns(3)
+                with cp_arz1:
+                    st.download_button(label="📄 PDF Agrupado (Grupos 2 letras)", data=pdf_ag_bytes, file_name=f"Palacio_Arzobispal_Agrupado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
+                with cp_arz2:
+                    st.download_button(label="📑 PDF Desarrollado (Grupos y Subcuentas)", data=pdf_de_bytes, file_name=f"Palacio_Arzobispal_Desarrollado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
+                with cp_arz3:
+                    st.download_button(label="📊 Excel Oficial Palacio (Letras)", data=ex_bytes, file_name=f"Cuentas_Palacio_Arzobispal_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                st.markdown("**1. Resumen Oficial Agrupado por Grupos Principales (2 letras):**")
+                st.dataframe(df_r3, use_container_width=True, hide_index=True)
+                st.markdown("**2. Desglose Específico por Subcuentas (2 letras + número):**")
+                st.dataframe(df_d8, use_container_width=True, hide_index=True)
+
 with p_con:
     if nivel_permiso != "TOTAL":
         st.error("🔒 Acceso exclusivo para Mayordomía.")
