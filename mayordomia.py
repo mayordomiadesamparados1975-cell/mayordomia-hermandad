@@ -1096,8 +1096,16 @@ with p_fil:
             ct3.markdown(f"**Rendimiento Neto:** <b>{(v_ing - v_gas):,.2f} €</b>", unsafe_allow_html=True)
         cb1, cb2 = st.columns(2)
         subtitulo_pdf = f"Filtro ({f_cuenta} | {f_tipo})" + (" - Agrupado por Conceptos" if agrupar_conceptos else "")
-        with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, subtitulo_pdf, agrupar=agrupar_conceptos), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
-        with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with cb1:
+            if st.button("👑 Preparar Extracto Horizontal PDF", use_container_width=True, key="btn_prep_ext_pdf"):
+                st.session_state["ext_pdf_bytes"] = generar_pdf_resumen(df_f, subtitulo_pdf, agrupar=agrupar_conceptos).getvalue()
+            if "ext_pdf_bytes" in st.session_state:
+                st.download_button(label="⬇️ Descargar Extracto PDF Listo", data=st.session_state["ext_pdf_bytes"], file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
+        with cb2:
+            if st.button("📊 Preparar Tabla Excel (.xlsx)", use_container_width=True, key="btn_prep_ext_ex"):
+                st.session_state["ext_ex_bytes"] = generar_excel(df_f, agrupar=agrupar_conceptos).getvalue()
+            if "ext_ex_bytes" in st.session_state:
+                st.download_button(label="⬇️ Descargar Excel Listo", data=st.session_state["ext_ex_bytes"], file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
     else:
