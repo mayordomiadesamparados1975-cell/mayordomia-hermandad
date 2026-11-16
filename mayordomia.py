@@ -17,13 +17,18 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
 if not st.session_state.autenticado:
-    clave = st.text_input("Contraseña de acceso", type="password")
-    if st.button("Entrar"):
-        if clave == st.secrets.get("password_hermandad", "Desamparados2026"):
-            st.session_state.autenticado = True
-            st.rerun()
-        else:
-            st.error("Contraseña incorrecta")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.image("escudo.png", width=150)
+        st.title("Hermandad de Nuestra Señora de los Desamparados")
+        st.subheader("Sistema de Mayordomía")
+        clave = st.text_input("Contraseña de acceso", type="password")
+        if st.button("Entrar", use_container_width=True):
+            if clave == st.secrets.get("password_hermandad", "Desamparados2026"):
+                st.session_state.autenticado = True
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta")
     st.stop()
 
 @st.cache_resource
