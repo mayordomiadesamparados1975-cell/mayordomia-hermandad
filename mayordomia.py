@@ -114,6 +114,10 @@ class TursoConn:
     def cursor(self): return TursoCursor()
     def commit(self): pass
     def sync(self): pass
+@st.cache_data(ttl=120, show_spinner=False)
+def leer_tabla_turso(sql, params=()):
+    cols, rows = ejecutar_turso_http(sql, params)
+    return pd.DataFrame(rows, columns=cols) if cols else pd.DataFrame()
 
 def conectar_bd():
     conn = TursoConn()
@@ -761,7 +765,7 @@ def dibujar_tabla_traspasos(df_t):
         else:
             st.caption("No existe ningún traspaso con ese número.")
 conn = conectar_bd()
-df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', COALESCE(proveedor, '') as 'Proveedor', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
+df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', COALESCE(proveedor, '') as 'Proveedor', COALESCE(num_factura, '') as 'Nº Factura', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
 if s_ini:
     caja_ini, banco_ini = s_ini
