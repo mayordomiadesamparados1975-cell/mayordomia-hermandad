@@ -13,88 +13,73 @@ if os.path.exists("escudo.png"):
     st.markdown(f'<link rel="apple-touch-icon" href="data:image/png;base64,{_ico_b64}"><link rel="icon" sizes="192x192" href="data:image/png;base64,{_ico_b64}">', unsafe_allow_html=True)
 st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
 
-if "autenticado" not in st.session_state: st.session_state.autenticado = False
-if not st.session_state.autenticado:
-    c_l1, c_l2, c_l3 = st.columns((1, 1.5, 1))
+if "usuario_rol" not in st.session_state:
+    st.session_state["usuario_rol"] = None
+if "usuario_permiso" not in st.session_state:
+    st.session_state["usuario_permiso"] = None
+
+if not st.session_state["usuario_rol"]:
+    _esc_login = obtener_escudo_b64()
+    img_log = f'<img src="data:image/png;base64,{_esc_login}" style="height: 95px; margin-bottom: 10px;">' if _esc_login else ""
+    st.markdown(f"<div style='text-align: center; padding-top: 30px;'>{img_log}<h2 style='color: #800020; margin: 0;'>Hermandad de Nuestra Señora de los Desamparados</h2><p style='color: #6B7280; font-weight: bold; letter-spacing: 1px;'>ACCESO RESTRINGIDO — MAYORDOMÍA</p></div>", unsafe_allow_html=True)
+    
+    c_l1, c_l2, c_l3 = st.columns((1, 1.4, 1))
     with c_l2:
-        if os.path.exists("escudo.png"): st.image("escudo.png", width=110)
-        st.markdown("### Acceso Restringido — Mayordomía")
-        clave = st.text_input("Introduce la contraseña de la Junta de Gobierno:", type="password")
-        if st.button("Entrar al Sistema", use_container_width=True):
-            if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
-            else: st.error("Contraseña incorrecta.")
+        with st.container(border=True):
+            clave_ingresada = st.text_input("🔑 Introduce tu clave personal de cargo:", type="password", key="input_clave_cargo")
+            if st.button("Entrar al Sistema", use_container_width=True):
+                mapa_claves = {
+                    st.secrets.get("clave_mayordomo_1", ""): ("Mayordomo 1", "TOTAL"),
+                    st.secrets.get("clave_mayordomo_2", ""): ("Mayordomo 2", "TOTAL"),
+                    st.secrets.get("clave_hermano_mayor", ""): ("Hermano Mayor", "SOLO_REGISTRO"),
+                    st.secrets.get("clave_secretaria", ""): ("Secretaria", "SOLO_REGISTRO"),
+                    st.secrets.get("clave_diputada_mayor", ""): ("Diputada Mayor de Gobierno", "SOLO_REGISTRO")
+                }
+                if clave_ingresada and clave_ingresada in mapa_claves:
+                    rol_det, perm_det = mapa_claves[clave_ingresada]
+                    st.session_state["usuario_rol"] = rol_det
+                    st.session_state["usuario_permiso"] = perm_det
+                    if perm_det == "TOTAL":
+                        try:
+                            conn = conectar_bd(); cur = conn.cursor()
+                            cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('sesion_mayordomo_activa', ?)", (f"{rol_det}|{datetime.now().timestamp()}",))
+                            conn.commit(); conn.sync()
+                        except: pass
+                    st.rerun()
+                else:
+                    st.error("Clave incorrecta. Verifica tu contraseña personal.")
     st.stop()
+quien_opera = st.session_state["usuario_rol"]
+nivel_permiso = st.session_state["usuario_permiso"]
 
-@st.cache_resource
-def obtener_sesion_http():
-    s = requests.Session()
-    s.headers.update({"Authorization": f"Bearer {st.secrets['TURSO_AUTH_TOKEN']}", "Content-Type": "application/json"})
-    return s
-
-def ejecutar_turso_http(sql, params=()):
-    url = st.secrets["TURSO_DATABASE_URL"].replace("libsql://", "https://").rstrip("/") + "/v2/pipeline"
-    args = list()
-    for p in params:
-        if p is None: args.append({"type": "null"})
-        elif isinstance(p, int): args.append({"type": "integer", "value": str(p)})
-        elif isinstance(p, float): args.append({"type": "float", "value": p})
-        else: args.append({"type": "text", "value": str(p)})
-    payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
-    r = obtener_sesion_http().post(url, json=payload, timeout=15)
-    r.raise_for_status()
-    res = itemgetter(0)(r.json()["results"])["response"]["result"]
-    cols = [c["name"] for c in res.get("cols", list())]
-    rows = list()
-    for row in res.get("rows", list()):
-        fila = list()
-        for cell in row:
-            t = cell.get("type")
-            if t == "null": fila.append(None)
-            elif t == "integer": fila.append(int(cell.get("value")))
-            elif t == "float": fila.append(float(cell.get("value")))
-            else: fila.append(cell.get("value"))
-        rows.append(tuple(fila))
-    return cols, rows
-class TursoCursor:
-    def __init__(self):
-        self.rows = list()
-    def execute(self, sql, params=()):
-        _, self.rows = ejecutar_turso_http(sql, params)
-        return self
-    def fetchall(self):
-        return self.rows
-    def fetchone(self):
-        return itemgetter(0)(self.rows) if self.rows else None
-
-class TursoConn:
-    def cursor(self): return TursoCursor()
-    def commit(self): pass
-    def sync(self): pass
-
-def leer_tabla_turso(sql):
-    cols, rows = ejecutar_turso_http(sql)
-    return pd.DataFrame(rows, columns=cols)
-
-def registrar_presencia_usuario(nombre_usuario, accion="registrar"):
-    ahora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ejecutar_turso_http("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_usuario', ?)", (f"{nombre_usuario} ({ahora_str})",))
-    ejecutar_turso_http("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultima_accion', ?)", (accion,))
-
-def comprobar_bloqueo_concurrencia(nombre_actual):
+def registrar_presencia_usuario(usuario, accion):
     try:
-        _, res_u = ejecutar_turso_http("SELECT valor FROM config_sistema WHERE clave = 'ultimo_usuario'")
-        _, res_a = ejecutar_turso_http("SELECT valor FROM config_sistema WHERE clave = 'ultima_accion'")
-        if res_u and res_a:
-            user_info = itemgetter(0)(res_u)[0]
-            accion_info = itemgetter(0)(res_a)[0]
-            if nombre_actual not in user_info:
-                fecha_partes = user_info.split("(")[1].replace(")", "").strip()
-                fecha_dt = datetime.strptime(fecha_partes, "%Y-%m-%d %H:%M:%S")
-                if (datetime.now() - fecha_dt).total_seconds() < 300:
-                    return f"⚠️ {user_info} está usando el módulo de {accion_info} ahora mismo. Espera a que termine para evitar duplicados."
-    except:
-        pass
+        conn = conectar_bd(); cur = conn.cursor()
+        ahora = datetime.now().timestamp()
+        cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_uso', ?)", (f"{usuario}|{accion}|{ahora}",))
+        if usuario in ["Mayordomo 1", "Mayordomo 2"]:
+            cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('sesion_mayordomo_activa', ?)", (f"{usuario}|{ahora}",))
+        conn.commit(); conn.sync()
+    except: pass
+
+def comprobar_bloqueo_concurrencia(usuario_actual):
+    try:
+        cols, rows = ejecutar_turso_http("SELECT clave, valor FROM config_sistema WHERE clave IN ('ultimo_uso', 'sesion_mayordomo_activa')")
+        ahora = datetime.now().timestamp()
+        for clv, val in rows:
+            partes = str(val).split("|")
+            if clv == "sesion_mayordomo_activa" and len(partes) == 2:
+                m_activo, ts_m = partes[0], float(partes[1])
+                if usuario_actual in ["Mayordomo 1", "Mayordomo 2"] and m_activo != usuario_actual and (ahora - ts_m) < 300:
+                    mins = max(1, int((300 - (ahora - ts_m)) // 60) + 1)
+                    return f"🛑 BLOQUEO DE MAYORDOMÍA: **{m_activo}** está trabajando actualmente en el sistema. Para evitar conflictos, tus botones de modificación están bloqueados hasta que cierre sesión o pasen {mins} min."
+            if clv == "ultimo_uso" and len(partes) == 3:
+                u_ant, acc_ant, ts_ant = partes[0], partes[1], float(partes[2])
+                if u_ant != usuario_actual and (ahora - ts_ant) < 120:
+                    return f"⚠️ CONCURRENCIA: **{u_ant}** acaba de registrar '{acc_ant}'. Espera 2 minutos para evitar duplicados."
+    except: pass
     return None
+
 
 def conectar_bd():
     conn = TursoConn()
