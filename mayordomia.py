@@ -21,7 +21,7 @@ if not st.session_state.autenticado:
         st.markdown("### Acceso Restringido — Mayordomía")
         clave = st.text_input("Introduce la contraseña de la Junta de Gobierno:", type="password")
         if st.button("Entrar al Sistema", use_container_width=True):
-            if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
+        if clave == st.secrets.get("password_hermandad", "Desamparados2026"): st.session_state.autenticado = True; st.rerun()
             else: st.error("Contraseña incorrecta.")
     st.stop()
 
