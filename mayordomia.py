@@ -13,19 +13,18 @@ if os.path.exists("escudo.png"):
     st.markdown(f'<link rel="apple-touch-icon" href="data:image/png;base64,{_ico_b64}"><link rel="icon" sizes="192x192" href="data:image/png;base64,{_ico_b64}">', unsafe_allow_html=True)
 st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
 
-if "autenticado" not in st.session_state: st.session_state.autenticado = False
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
 if not st.session_state.autenticado:
-    c_l1, c_l2, c_l3 = st.columns((1, 1.5, 1))
-    with c_l2:
-        if os.path.exists("escudo.png"): st.image("escudo.png", width=110)
-        st.markdown("### Acceso Restringido — Mayordomía")
-        clave = st.text_input("Introduce la contraseña de la Junta de Gobierno:", type="password")
+    clave = st.text_input("Contraseña de acceso", type="password")
     if st.button("Entrar"):
         if clave == st.secrets.get("password_hermandad", "Desamparados2026"):
             st.session_state.autenticado = True
             st.rerun()
         else:
             st.error("Contraseña incorrecta")
+    st.stop()
 
 @st.cache_resource
 def obtener_sesion_http():
