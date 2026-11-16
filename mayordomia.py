@@ -887,9 +887,8 @@ if modo_movil:
                 st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
     st.stop()
 if nivel_permiso == "SOLO_REGISTRO":
-    st.warning("🔒 Tu perfil está habilitado únicamente para **registrar nuevos movimientos contables**. Para consultar saldos, editar apuntes o imprimir informes contacta con Mayordomía.")
-    p_reg = st.container()
-    p_fil = None; p_pre = None; p_con = None
+    st.warning("🔒 Tu perfil está habilitado únicamente para **registrar nuevos movimientos contables**.")
+    p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔒 Libro Diario (Solo Mayordomía)", "🔒 Presupuestos (Solo Mayordomía)", "🔒 Configuración (Solo Mayordomía)"])
 else:
     m1, m2, m3 = st.columns(3)
     m1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
@@ -897,6 +896,7 @@ else:
     m3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
     st.markdown("---")
     p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
+
 
 with p_reg:
     c_r1, c_r2 = st.columns(2)
@@ -1014,7 +1014,11 @@ with p_reg:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("¡Traspaso interno asentado en las cuentas!"); st.rerun()
-if p_fil is not None:
+with p_fil:
+    if nivel_permiso != "TOTAL":
+        st.error("🔒 Acceso exclusivo para Mayordomía.")
+        st.stop()
+
     with st.container(border=True):
         cf1, cf2, cf3, cf4 = st.columns(4)
         with cf1: f_cuenta = st.selectbox("Cuenta:", ["Todas", "Caja", "Banco"]); f_tipo = st.selectbox("Tipo:", ["Todos", "Ingreso", "Gasto"])
@@ -1103,7 +1107,11 @@ if p_fil is not None:
     df_t_vista = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos")
     with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
         dibujar_tabla_traspasos(df_t_vista)
-if p_pre is not None:
+with p_pre:
+    if nivel_permiso != "TOTAL":
+        st.error("🔒 Acceso exclusivo para Mayordomía.")
+        st.stop()
+
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
     df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
     dict_pres = dict(zip(df_pres['partida'], df_pres['importe_presupuestado']))
@@ -1197,7 +1205,11 @@ if p_pre is not None:
             st.dataframe(df_r3, use_container_width=True, hide_index=True)
             st.markdown("**2. Desglose Específico por Subcuentas (2 letras + número):**")
             st.dataframe(df_d8, use_container_width=True, hide_index=True)
-if p_con is not None:
+with p_con:
+    if nivel_permiso != "TOTAL":
+        st.error("🔒 Acceso exclusivo para Mayordomía.")
+        st.stop()
+
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.markdown("**💰 Fondos Iniciales de Apertura**")
