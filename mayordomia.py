@@ -82,6 +82,26 @@ def comprobar_bloqueo_concurrencia(usuario_actual):
                     return f"⚠️ CONCURRENCIA: **{u_ant}** acaba de registrar '{acc_ant}'. Espera 2 minutos para evitar duplicados."
     except: pass
     return None
+import urllib.request
+import json
+
+def ejecutar_turso_http(sql, params=()):
+    url = st.secrets["turso_url"].replace("libsql://", "https://") + "/v2/pipeline"
+    token = st.secrets["turso_token"]
+    args = list()
+    for p in params:
+        if p is None: args.append({"type": "null"})
+        elif isinstance(p, int): args.append({"type": "integer", "value": str(p)})
+        elif isinstance(p, float): args.append({"type": "float", "value": p})
+        else: args.append({"type": "text", "value": str(p)})
+    payload = json.dumps({"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        res = data.get("results", [{}])[0].get("response", {}).get("result", {})
+        cols = [c.get("name") for c in res.get("cols", [])]
+        rows = [[cell.get("value") for cell in row] for row in res.get("rows", [])]
+        return cols, rows
 
 class TursoCursor:
     def execute(self, sql, params=()): ejecutar_turso_http(sql, params); return self
