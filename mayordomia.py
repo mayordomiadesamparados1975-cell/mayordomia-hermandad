@@ -86,8 +86,10 @@ import urllib.request
 import json
 
 def ejecutar_turso_http(sql, params=()):
-    url = st.secrets["turso_url"].replace("libsql://", "https://") + "/v2/pipeline"
-    token = st.secrets["turso_token"]
+    raw_url = st.secrets.get("TURSO_DATABASE_URL") or st.secrets.get("TURSO_URL") or st.secrets.get("turso_url") or ""
+    token = st.secrets.get("TURSO_AUTH_TOKEN") or st.secrets.get("TURSO_TOKEN") or st.secrets.get("turso_token") or ""
+    url = raw_url.replace("libsql://", "https://") + "/v2/pipeline"
+
     args = list()
     for p in params:
         if p is None: args.append({"type": "null"})
