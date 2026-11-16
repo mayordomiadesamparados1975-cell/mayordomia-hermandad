@@ -19,7 +19,10 @@ if "usuario_permiso" not in st.session_state:
     st.session_state["usuario_permiso"] = None
 
 if not st.session_state["usuario_rol"]:
-    _esc_login = obtener_escudo_b64()
+    _esc_login = ""
+    if os.path.exists("escudo.png"):
+        with open("escudo.png", "rb") as _fl: _esc_login = base64.b64encode(_fl.read()).decode()
+
     img_log = f'<img src="data:image/png;base64,{_esc_login}" style="height: 95px; margin-bottom: 10px;">' if _esc_login else ""
     st.markdown(f"<div style='text-align: center; padding-top: 30px;'>{img_log}<h2 style='color: #800020; margin: 0;'>Hermandad de Nuestra Señora de los Desamparados</h2><p style='color: #6B7280; font-weight: bold; letter-spacing: 1px;'>ACCESO RESTRINGIDO — MAYORDOMÍA</p></div>", unsafe_allow_html=True)
     
