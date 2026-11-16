@@ -13,112 +13,88 @@ if os.path.exists("escudo.png"):
     st.markdown(f'<link rel="apple-touch-icon" href="data:image/png;base64,{_ico_b64}"><link rel="icon" sizes="192x192" href="data:image/png;base64,{_ico_b64}">', unsafe_allow_html=True)
 st.markdown("<style>.main { background-color: #FDFCFB; } h1, h2, h3 { color: #800020 !important; font-family: 'Georgia', serif; } .stButton>button { background-color: #800020; color: white; border-radius: 4px; border: none; font-weight: bold; } .stButton>button:hover { background-color: #5C0017; color: white; } div[data-testid='stMetricValue'] { font-size: 26px; font-weight: bold; color: #800020; } div[data-testid='stMetricLabel'] { font-size: 13px; font-weight: 600; color: #4B5563; } .stRadio>label { font-weight: bold; }</style>", unsafe_allow_html=True)
 
-if "usuario_rol" not in st.session_state:
-    st.session_state["usuario_rol"] = None
-if "usuario_permiso" not in st.session_state:
-    st.session_state["usuario_permiso"] = None
-
-if not st.session_state["usuario_rol"]:
-    _esc_login = ""
-    if os.path.exists("escudo.png"):
-        with open("escudo.png", "rb") as _fl: _esc_login = base64.b64encode(_fl.read()).decode()
-
-    img_log = f'<img src="data:image/png;base64,{_esc_login}" style="height: 95px; margin-bottom: 10px;">' if _esc_login else ""
-    st.markdown(f"<div style='text-align: center; padding-top: 30px;'>{img_log}<h2 style='color: #800020; margin: 0;'>Hermandad de Nuestra Señora de los Desamparados</h2><p style='color: #6B7280; font-weight: bold; letter-spacing: 1px;'>ACCESO RESTRINGIDO — MAYORDOMÍA</p></div>", unsafe_allow_html=True)
-    
-    c_l1, c_l2, c_l3 = st.columns((1, 1.4, 1))
+if "autenticado" not in st.session_state: st.session_state.autenticado = False
+if not st.session_state.autenticado:
+    c_l1, c_l2, c_l3 = st.columns((1, 1.5, 1))
     with c_l2:
-        with st.container(border=True):
-            clave_ingresada = st.text_input("🔑 Introduce tu clave personal de cargo:", type="password", key="input_clave_cargo")
-            if st.button("Entrar al Sistema", use_container_width=True):
-                mapa_claves = {
-                    st.secrets.get("clave_mayordomo_1", ""): ("Mayordomo 1", "TOTAL"),
-                    st.secrets.get("clave_mayordomo_2", ""): ("Mayordomo 2", "TOTAL"),
-                    st.secrets.get("clave_hermano_mayor", ""): ("Hermano Mayor", "SOLO_REGISTRO"),
-                    st.secrets.get("clave_secretaria", ""): ("Secretaria", "SOLO_REGISTRO"),
-                    st.secrets.get("clave_diputada_mayor", ""): ("Diputada Mayor de Gobierno", "SOLO_REGISTRO")
-                }
-                if clave_ingresada and clave_ingresada in mapa_claves:
-                    rol_det, perm_det = mapa_claves[clave_ingresada]
-                    st.session_state["usuario_rol"] = rol_det
-                    st.session_state["usuario_permiso"] = perm_det
-                    if perm_det == "TOTAL":
-                        try:
-                            conn = conectar_bd(); cur = conn.cursor()
-                            cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('sesion_mayordomo_activa', ?)", (f"{rol_det}|{datetime.now().timestamp()}",))
-                            conn.commit(); conn.sync()
-                        except: pass
-                    st.rerun()
-                else:
-                    st.error("Clave incorrecta. Verifica tu contraseña personal.")
+        if os.path.exists("escudo.png"): st.image("escudo.png", width=110)
+        st.markdown("### Acceso Restringido — Mayordomía")
+        clave = st.text_input("Introduce la contraseña de la Junta de Gobierno:", type="password")
+        if st.button("Entrar al Sistema", use_container_width=True):
+            if clave == st.secrets["password_hermandad"]: st.session_state.autenticado = True; st.rerun()
+            else: st.error("Contraseña incorrecta.")
     st.stop()
-quien_opera = st.session_state["usuario_rol"]
-nivel_permiso = st.session_state["usuario_permiso"]
 
-def registrar_presencia_usuario(usuario, accion):
-    try:
-        conn = conectar_bd(); cur = conn.cursor()
-        ahora = datetime.now().timestamp()
-        cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_uso', ?)", (f"{usuario}|{accion}|{ahora}",))
-        if usuario in ["Mayordomo 1", "Mayordomo 2"]:
-            cur.execute("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('sesion_mayordomo_activa', ?)", (f"{usuario}|{ahora}",))
-        conn.commit(); conn.sync()
-    except: pass
-
-@st.cache_data(ttl=15, show_spinner=False)
-def comprobar_bloqueo_concurrencia(usuario_actual):
-    try:
-        cols, rows = ejecutar_turso_http("SELECT clave, valor FROM config_sistema WHERE clave IN ('ultimo_uso', 'sesion_mayordomo_activa')")
-        ahora = datetime.now().timestamp()
-        for clv, val in rows:
-            partes = str(val).split("|")
-            if clv == "sesion_mayordomo_activa" and len(partes) == 2:
-                m_activo, ts_m = partes[0], float(partes[1])
-                if usuario_actual in ["Mayordomo 1", "Mayordomo 2"] and m_activo != usuario_actual and (ahora - ts_m) < 300:
-                    mins = max(1, int((300 - (ahora - ts_m)) // 60) + 1)
-                    return f"🛑 BLOQUEO DE MAYORDOMÍA: **{m_activo}** está trabajando actualmente en el sistema. Para evitar conflictos, tus botones de modificación están bloqueados hasta que cierre sesión o pasen {mins} min."
-            if clv == "ultimo_uso" and len(partes) == 3:
-                u_ant, acc_ant, ts_ant = partes[0], partes[1], float(partes[2])
-                if u_ant != usuario_actual and (ahora - ts_ant) < 120:
-                    return f"⚠️ CONCURRENCIA: **{u_ant}** acaba de registrar '{acc_ant}'. Espera 2 minutos para evitar duplicados."
-    except: pass
-    return None
-import urllib.request
-import json
+@st.cache_resource
+def obtener_sesion_http():
+    s = requests.Session()
+    s.headers.update({"Authorization": f"Bearer {st.secrets['TURSO_AUTH_TOKEN']}", "Content-Type": "application/json"})
+    return s
 
 def ejecutar_turso_http(sql, params=()):
-    raw_url = st.secrets.get("TURSO_DATABASE_URL") or st.secrets.get("TURSO_URL") or st.secrets.get("turso_url") or ""
-    token = st.secrets.get("TURSO_AUTH_TOKEN") or st.secrets.get("TURSO_TOKEN") or st.secrets.get("turso_token") or ""
-    url = raw_url.replace("libsql://", "https://") + "/v2/pipeline"
-
+    url = st.secrets["TURSO_DATABASE_URL"].replace("libsql://", "https://").rstrip("/") + "/v2/pipeline"
     args = list()
     for p in params:
         if p is None: args.append({"type": "null"})
         elif isinstance(p, int): args.append({"type": "integer", "value": str(p)})
         elif isinstance(p, float): args.append({"type": "float", "value": p})
         else: args.append({"type": "text", "value": str(p)})
-    payload = json.dumps({"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}).encode("utf-8")
-    req = urllib.request.Request(url, data=payload, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        res = data.get("results", [{}])[0].get("response", {}).get("result", {})
-        cols = [c.get("name") for c in res.get("cols", [])]
-        rows = [[cell.get("value") for cell in row] for row in res.get("rows", [])]
-        return cols, rows
-
+    payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
+    r = obtener_sesion_http().post(url, json=payload, timeout=15)
+    r.raise_for_status()
+    res = itemgetter(0)(r.json()["results"])["response"]["result"]
+    cols = [c["name"] for c in res.get("cols", list())]
+    rows = list()
+    for row in res.get("rows", list()):
+        fila = list()
+        for cell in row:
+            t = cell.get("type")
+            if t == "null": fila.append(None)
+            elif t == "integer": fila.append(int(cell.get("value")))
+            elif t == "float": fila.append(float(cell.get("value")))
+            else: fila.append(cell.get("value"))
+        rows.append(tuple(fila))
+    return cols, rows
 class TursoCursor:
-    def execute(self, sql, params=()): ejecutar_turso_http(sql, params); return self
-    def fetchone(self): return None
-    def fetchall(self): return []
+    def __init__(self):
+        self.rows = list()
+    def execute(self, sql, params=()):
+        _, self.rows = ejecutar_turso_http(sql, params)
+        return self
+    def fetchall(self):
+        return self.rows
+    def fetchone(self):
+        return itemgetter(0)(self.rows) if self.rows else None
 
 class TursoConn:
     def cursor(self): return TursoCursor()
     def commit(self): pass
     def sync(self): pass
-@st.cache_data(ttl=120, show_spinner=False)
-def leer_tabla_turso(sql, params=()):
-    cols, rows = ejecutar_turso_http(sql, params)
-    return pd.DataFrame(rows, columns=cols) if cols else pd.DataFrame()
+
+def leer_tabla_turso(sql):
+    cols, rows = ejecutar_turso_http(sql)
+    return pd.DataFrame(rows, columns=cols)
+
+def registrar_presencia_usuario(nombre_usuario, accion="registrar"):
+    ahora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ejecutar_turso_http("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultimo_usuario', ?)", (f"{nombre_usuario} ({ahora_str})",))
+    ejecutar_turso_http("INSERT OR REPLACE INTO config_sistema (clave, valor) VALUES ('ultima_accion', ?)", (accion,))
+
+def comprobar_bloqueo_concurrencia(nombre_actual):
+    try:
+        _, res_u = ejecutar_turso_http("SELECT valor FROM config_sistema WHERE clave = 'ultimo_usuario'")
+        _, res_a = ejecutar_turso_http("SELECT valor FROM config_sistema WHERE clave = 'ultima_accion'")
+        if res_u and res_a:
+            user_info = itemgetter(0)(res_u)[0]
+            accion_info = itemgetter(0)(res_a)[0]
+            if nombre_actual not in user_info:
+                fecha_partes = user_info.split("(")[1].replace(")", "").strip()
+                fecha_dt = datetime.strptime(fecha_partes, "%Y-%m-%d %H:%M:%S")
+                if (datetime.now() - fecha_dt).total_seconds() < 300:
+                    return f"⚠️ {user_info} está usando el módulo de {accion_info} ahora mismo. Espera a que termine para evitar duplicados."
+    except:
+        pass
+    return None
 
 def conectar_bd():
     conn = TursoConn()
@@ -766,7 +742,7 @@ def dibujar_tabla_traspasos(df_t):
         else:
             st.caption("No existe ningún traspaso con ese número.")
 conn = conectar_bd()
-df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', COALESCE(proveedor, '') as 'Proveedor', COALESCE(num_factura, '') as 'Nº Factura', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
+df_global = leer_tabla_turso("SELECT id, fecha as 'Fecha', tipo as 'Tipo', origen_destino as 'Cuenta', partida as 'Partida', COALESCE(proveedor, '') as 'Proveedor', concepto as 'Concepto', forma_pago as 'Forma Pago', importe as 'Importe (€)', comprobante as 'Comprobante', COALESCE(pendiente, 0) as 'Pendiente' FROM contabilidad WHERE COALESCE(eliminado, 0) = 0 ORDER BY id DESC")
 cursor = conn.cursor(); cursor.execute("SELECT caja_inicio, banco_inicio FROM saldos_iniciales WHERE id = 1"); s_ini = cursor.fetchone()
 if s_ini:
     caja_ini, banco_ini = s_ini
@@ -829,26 +805,12 @@ modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido
 st.markdown("---")
 
 # 3. Si es móvil, se muestra la vista móvil simplificada y se detiene aquí la carga
-cb_u1, cb_u2 = st.columns((3, 1))
-cb_u1.info(f"👤 Conectado como: **{quien_opera}** | Permisos: **{'Acceso Total (Mayordomía)' if nivel_permiso == 'TOTAL' else 'Solo Registro de Nuevos Movimientos'}**")
-if cb_u2.button("🚪 Cerrar Sesión Segura", use_container_width=True):
-    if quien_opera in ["Mayordomo 1", "Mayordomo 2"]:
-        try:
-            conn = conectar_bd(); cur = conn.cursor()
-            cur.execute("DELETE FROM config_sistema WHERE clave = 'sesion_mayordomo_activa'")
-            conn.commit(); conn.sync()
-        except: pass
-    st.session_state["usuario_rol"] = None
-    st.session_state["usuario_permiso"] = None
-    st.rerun()
-
 if modo_movil:
-    if nivel_permiso == "TOTAL":
-        cm1, cm2 = st.columns(2)
-        cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
-        cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
-        st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
-        st.markdown("---")
+    cm1, cm2 = st.columns(2)
+    cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
+    cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
+    st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
+    st.markdown("---")
     st.markdown("#### ⚡ Apunte Rápido desde Móvil")
     m_tipo = st.radio("Operación:", ["Gasto", "Ingreso"], horizontal=True, key="m_tipo")
     m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
@@ -860,7 +822,7 @@ if modo_movil:
     m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
     m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
 
-    bloqueo_movil = comprobar_bloqueo_concurrencia(quien_opera)
+    bloqueo_movil = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
     if bloqueo_movil:
         st.warning(bloqueo_movil)
         st.button("🔒 GUARDADO DESACTIVADO POR CONCURRENCIA", disabled=True, use_container_width=True)
@@ -869,7 +831,7 @@ if modo_movil:
             if not m_concepto.strip():
                 st.error("Escribe un detalle antes de guardar.")
             else:
-                registrar_presencia_usuario(quien_opera, "Vista Móvil")
+                registrar_presencia_usuario(st.session_state.get("usr_activo", "Usuario"), "Vista Móvil")
                 n_arc = ""
                 if m_foto is not None:
                     n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
@@ -879,25 +841,26 @@ if modo_movil:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("¡Apunte registrado en la nube!"); st.rerun()
-    if nivel_permiso == "TOTAL":
-        st.markdown("---")
-        st.markdown("##### 🕒 Últimos 5 movimientos")
-        if not df_global.empty:
-            for _, r_m in df_global.head(5).iterrows():
-                col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
-                st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
-    st.stop()
-if nivel_permiso == "SOLO_REGISTRO":
-    st.warning("🔒 Tu perfil está habilitado únicamente para **registrar nuevos movimientos contables**.")
-    p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔒 Libro Diario (Solo Mayordomía)", "🔒 Presupuestos (Solo Mayordomía)", "🔒 Configuración (Solo Mayordomía)"])
-else:
-    m1, m2, m3 = st.columns(3)
-    m1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
-    m2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
-    m3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
     st.markdown("---")
-    p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
+    st.markdown("##### 🕒 Últimos 5 movimientos")
+    if not df_global.empty:
+        for _, r_m in df_global.head(5).iterrows():
+            col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
+            st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
+    st.stop()
+# 4. Si es ordenador de escritorio, muestra las tarjetas normales y el identificador
+c1, c2, c3 = st.columns(3)
+c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
+c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
+c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
+st.markdown("---")
 
+quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
+st.markdown("---")
+# --- FIN DE LA CABECERA ---
+
+# --- DECLARACIÓN OFICIAL DE LAS PESTAÑAS DEL PROGRAMA ---
+p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
 with p_reg:
     c_r1, c_r2 = st.columns(2)
@@ -1016,10 +979,6 @@ with p_reg:
                 st.cache_data.clear()
                 st.success("¡Traspaso interno asentado en las cuentas!"); st.rerun()
 with p_fil:
-    if nivel_permiso != "TOTAL":
-        st.error("🔒 Acceso exclusivo para Mayordomía.")
-        st.stop()
-
     with st.container(border=True):
         cf1, cf2, cf3, cf4 = st.columns(4)
         with cf1: f_cuenta = st.selectbox("Cuenta:", ["Todas", "Caja", "Banco"]); f_tipo = st.selectbox("Tipo:", ["Todos", "Ingreso", "Gasto"])
@@ -1096,16 +1055,8 @@ with p_fil:
             ct3.markdown(f"**Rendimiento Neto:** <b>{(v_ing - v_gas):,.2f} €</b>", unsafe_allow_html=True)
         cb1, cb2 = st.columns(2)
         subtitulo_pdf = f"Filtro ({f_cuenta} | {f_tipo})" + (" - Agrupado por Conceptos" if agrupar_conceptos else "")
-        with cb1:
-            if st.button("👑 Preparar Extracto Horizontal PDF", use_container_width=True, key="btn_prep_ext_pdf"):
-                st.session_state["ext_pdf_bytes"] = generar_pdf_resumen(df_f, subtitulo_pdf, agrupar=agrupar_conceptos).getvalue()
-            if "ext_pdf_bytes" in st.session_state:
-                st.download_button(label="⬇️ Descargar Extracto PDF Listo", data=st.session_state["ext_pdf_bytes"], file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
-        with cb2:
-            if st.button("📊 Preparar Tabla Excel (.xlsx)", use_container_width=True, key="btn_prep_ext_ex"):
-                st.session_state["ext_ex_bytes"] = generar_excel(df_f, agrupar=agrupar_conceptos).getvalue()
-            if "ext_ex_bytes" in st.session_state:
-                st.download_button(label="⬇️ Descargar Excel Listo", data=st.session_state["ext_ex_bytes"], file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, subtitulo_pdf, agrupar=agrupar_conceptos), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
+        with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
     else:
@@ -1117,10 +1068,6 @@ with p_fil:
     with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
         dibujar_tabla_traspasos(df_t_vista)
 with p_pre:
-    if nivel_permiso != "TOTAL":
-        st.error("🔒 Acceso exclusivo para Mayordomía.")
-        st.stop()
-
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
     df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
     dict_pres = dict(zip(df_pres['partida'], df_pres['importe_presupuestado']))
@@ -1202,28 +1149,19 @@ with p_pre:
         st.download_button(label="👑 IMPRIMIR INFORME PRESUPUESTARIO GLOBAL (CABILDO GENERAL - PDF)", data=generar_pdf_presupuesto_global(tablas_tot["Ingreso"], tablas_tot["Gasto"]), file_name="Informe_Presupuestario_Global_Cabildo.pdf", mime="application/pdf", use_container_width=True)
         st.markdown("---")
         with st.expander("⛪ Informe Oficial Palacio Arzobispal (Grupos 2 letras y Subcuentas)", expanded=False):
-            if st.button("🔄 Calcular y Preparar Informes Oficiales Palacio Arzobispal", use_container_width=True, key="btn_prep_palacio"):
-                df_r3, df_d8, excel_arz, pdf_arz_agrupado, pdf_arz_desarrollado = generar_informe_arzobispado(df_global, dict_pres)
-                st.session_state["palacio_listo"] = (df_r3, df_d8, excel_arz.getvalue(), pdf_arz_agrupado.getvalue(), pdf_arz_desarrollado.getvalue())
-            if "palacio_listo" in st.session_state:
-                df_r3, df_d8, ex_bytes, pdf_ag_bytes, pdf_de_bytes = st.session_state["palacio_listo"]
-                cp_arz1, cp_arz2, cp_arz3 = st.columns(3)
-                with cp_arz1:
-                    st.download_button(label="📄 PDF Agrupado (Grupos 2 letras)", data=pdf_ag_bytes, file_name=f"Palacio_Arzobispal_Agrupado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
-                with cp_arz2:
-                    st.download_button(label="📑 PDF Desarrollado (Grupos y Subcuentas)", data=pdf_de_bytes, file_name=f"Palacio_Arzobispal_Desarrollado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
-                with cp_arz3:
-                    st.download_button(label="📊 Excel Oficial Palacio (Letras)", data=ex_bytes, file_name=f"Cuentas_Palacio_Arzobispal_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-                st.markdown("**1. Resumen Oficial Agrupado por Grupos Principales (2 letras):**")
-                st.dataframe(df_r3, use_container_width=True, hide_index=True)
-                st.markdown("**2. Desglose Específico por Subcuentas (2 letras + número):**")
-                st.dataframe(df_d8, use_container_width=True, hide_index=True)
-
+            df_r3, df_d8, excel_arz, pdf_arz_agrupado, pdf_arz_desarrollado = generar_informe_arzobispado(df_global, dict_pres)
+            cp_arz1, cp_arz2, cp_arz3 = st.columns(3)
+            with cp_arz1:
+                st.download_button(label="📄 PDF Agrupado (Grupos 2 letras)", data=pdf_arz_agrupado, file_name=f"Palacio_Arzobispal_Agrupado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
+            with cp_arz2:
+                st.download_button(label="📑 PDF Desarrollado (Grupos y Subcuentas)", data=pdf_arz_desarrollado, file_name=f"Palacio_Arzobispal_Desarrollado_{date.today().year}.pdf", mime="application/pdf", use_container_width=True)
+            with cp_arz3:
+                st.download_button(label="📊 Excel Oficial Palacio (Letras)", data=excel_arz, file_name=f"Cuentas_Palacio_Arzobispal_Sevilla_{date.today().year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            st.markdown("**1. Resumen Oficial Agrupado por Grupos Principales (2 letras):**")
+            st.dataframe(df_r3, use_container_width=True, hide_index=True)
+            st.markdown("**2. Desglose Específico por Subcuentas (2 letras + número):**")
+            st.dataframe(df_d8, use_container_width=True, hide_index=True)
 with p_con:
-    if nivel_permiso != "TOTAL":
-        st.error("🔒 Acceso exclusivo para Mayordomía.")
-        st.stop()
-
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.markdown("**💰 Fondos Iniciales de Apertura**")
@@ -1420,4 +1358,3 @@ with p_con:
                                 cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,))
                                 conn.commit(); conn.sync()
                                 st.cache_data.clear(); st.rerun()
-
