@@ -22,8 +22,7 @@ if not st.session_state.autenticado:
         clave = st.text_input("Introduce la contraseña de la Junta de Gobierno:", type="password")
         if st.button("Entrar al Sistema", use_container_width=True):
         if clave == st.secrets.get("password_hermandad", "Desamparados2026"): st.session_state.autenticado = True; st.rerun()
-            else: st.error("Contraseña incorrecta.")
-    st.stop()
+            st.stop()
 
 @st.cache_resource
 def obtener_sesion_http():
