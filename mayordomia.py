@@ -21,7 +21,7 @@ if not st.session_state.autenticado:
     with col2:
         st.image("escudo.png", width=150)
         st.title("Hermandad de Nuestra Señora de los Desamparados")
-        st.subheader("Sistema de Mayordomía")
+        st.subheader("Acceso Mayordomía")
         clave = st.text_input("Contraseña de acceso", type="password")
         if st.button("Entrar", use_container_width=True):
             if clave == st.secrets.get("password_hermandad", "Desamparados2026"):
