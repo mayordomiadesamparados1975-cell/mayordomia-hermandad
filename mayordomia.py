@@ -790,12 +790,26 @@ modo_movil = st.toggle("📱 Activar Vista Móvil Simplificada (Registro Rápido
 st.markdown("---")
 
 # 3. Si es móvil, se muestra la vista móvil simplificada y se detiene aquí la carga
+cb_u1, cb_u2 = st.columns((3, 1))
+cb_u1.info(f"👤 Conectado como: **{quien_opera}** | Permisos: **{'Acceso Total (Mayordomía)' if nivel_permiso == 'TOTAL' else 'Solo Registro de Nuevos Movimientos'}**")
+if cb_u2.button("🚪 Cerrar Sesión Segura", use_container_width=True):
+    if quien_opera in ["Mayordomo 1", "Mayordomo 2"]:
+        try:
+            conn = conectar_bd(); cur = conn.cursor()
+            cur.execute("DELETE FROM config_sistema WHERE clave = 'sesion_mayordomo_activa'")
+            conn.commit(); conn.sync()
+        except: pass
+    st.session_state["usuario_rol"] = None
+    st.session_state["usuario_permiso"] = None
+    st.rerun()
+
 if modo_movil:
-    cm1, cm2 = st.columns(2)
-    cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
-    cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
-    st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
-    st.markdown("---")
+    if nivel_permiso == "TOTAL":
+        cm1, cm2 = st.columns(2)
+        cm1.metric("🏪 Caja Física", f"{s_caja:,.2f} €")
+        cm2.metric("🏦 Banco", f"{s_banco:,.2f} €")
+        st.markdown(f"**💰 Total Cofradía:** `{(s_caja + s_banco):,.2f} €`")
+        st.markdown("---")
     st.markdown("#### ⚡ Apunte Rápido desde Móvil")
     m_tipo = st.radio("Operación:", ["Gasto", "Ingreso"], horizontal=True, key="m_tipo")
     m_cuenta = st.radio("Cuenta:", ["Caja", "Banco"], horizontal=True, key="m_cuenta")
@@ -807,7 +821,7 @@ if modo_movil:
     m_importe = st.number_input("Importe (€):", min_value=0.01, step=1.0, format="%.2f", key="m_imp")
     m_foto = st.file_uploader("📸 Hacer Foto al Ticket / Recibo:", type=["png", "jpg", "jpeg", "pdf"], key="m_foto")
 
-    bloqueo_movil = comprobar_bloqueo_concurrencia(st.session_state.get("usr_activo", "Usuario"))
+    bloqueo_movil = comprobar_bloqueo_concurrencia(quien_opera)
     if bloqueo_movil:
         st.warning(bloqueo_movil)
         st.button("🔒 GUARDADO DESACTIVADO POR CONCURRENCIA", disabled=True, use_container_width=True)
@@ -816,7 +830,7 @@ if modo_movil:
             if not m_concepto.strip():
                 st.error("Escribe un detalle antes de guardar.")
             else:
-                registrar_presencia_usuario(st.session_state.get("usr_activo", "Usuario"), "Vista Móvil")
+                registrar_presencia_usuario(quien_opera, "Vista Móvil")
                 n_arc = ""
                 if m_foto is not None:
                     n_arc = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{m_foto.name}"
@@ -826,26 +840,25 @@ if modo_movil:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("¡Apunte registrado en la nube!"); st.rerun()
-    st.markdown("---")
-    st.markdown("##### 🕒 Últimos 5 movimientos")
-    if not df_global.empty:
-        for _, r_m in df_global.head(5).iterrows():
-            col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
-            st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
+    if nivel_permiso == "TOTAL":
+        st.markdown("---")
+        st.markdown("##### 🕒 Últimos 5 movimientos")
+        if not df_global.empty:
+            for _, r_m in df_global.head(5).iterrows():
+                col_ic = "🟢" if r_m.get('Tipo') == 'Ingreso' else "🔴"
+                st.markdown(f"{col_ic} **{r_m.get('Importe (€)'):,.2f} €** — {r_m.get('Partida')} ({r_m.get('Concepto')}) <br/><small style='color:gray;'>{r_m.get('Fecha')} | {r_m.get('Cuenta')}</small>", unsafe_allow_html=True)
     st.stop()
-# 4. Si es ordenador de escritorio, muestra las tarjetas normales y el identificador
-c1, c2, c3 = st.columns(3)
-c1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
-c2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
-c3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
-st.markdown("---")
-
-quien_opera = st.selectbox("👤 Identificación de usuario activo:", ["Mayordomo", "Secretario", "Hermano Mayor", "Diputado de Gobierno"], key="usr_activo")
-st.markdown("---")
-# --- FIN DE LA CABECERA ---
-
-# --- DECLARACIÓN OFICIAL DE LAS PESTAÑAS DEL PROGRAMA ---
-p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
+if nivel_permiso == "SOLO_REGISTRO":
+    st.warning("🔒 Tu perfil está habilitado únicamente para **registrar nuevos movimientos contables**. Para consultar saldos, editar apuntes o imprimir informes contacta con Mayordomía.")
+    p_reg = st.container()
+    p_fil = None; p_pre = None; p_con = None
+else:
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🏪 Saldo Real en Caja Física", f"{s_caja:,.2f} €")
+    m2.metric("🏦 Saldo Real en Banco", f"{s_banco:,.2f} €")
+    m3.metric("💰 Caja Total Cofradía", f"{(s_caja + s_banco):,.2f} €")
+    st.markdown("---")
+    p_reg, p_fil, p_pre, p_con = st.tabs(["📝 Registrar Movimiento", "🔍 Libro Diario y Filtros", "📊 Presupuestos y Cierre Anual", "⚙️ Configuración y Respaldos"])
 
 with p_reg:
     c_r1, c_r2 = st.columns(2)
@@ -963,7 +976,7 @@ with p_reg:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("¡Traspaso interno asentado en las cuentas!"); st.rerun()
-with p_fil:
+if p_fil is not None:
     with st.container(border=True):
         cf1, cf2, cf3, cf4 = st.columns(4)
         with cf1: f_cuenta = st.selectbox("Cuenta:", ["Todas", "Caja", "Banco"]); f_tipo = st.selectbox("Tipo:", ["Todos", "Ingreso", "Gasto"])
@@ -1052,7 +1065,7 @@ with p_fil:
     df_t_vista = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos")
     with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
         dibujar_tabla_traspasos(df_t_vista)
-with p_pre:
+if p_pre is not None:
     st.markdown("#### 📊 Control Presupuestario del Ejercicio en Curso")
     df_pres = leer_tabla_turso("SELECT partida, importe_presupuestado FROM presupuestos")
     dict_pres = dict(zip(df_pres['partida'], df_pres['importe_presupuestado']))
@@ -1146,7 +1159,7 @@ with p_pre:
             st.dataframe(df_r3, use_container_width=True, hide_index=True)
             st.markdown("**2. Desglose Específico por Subcuentas (2 letras + número):**")
             st.dataframe(df_d8, use_container_width=True, hide_index=True)
-with p_con:
+if p_con is not None:
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.markdown("**💰 Fondos Iniciales de Apertura**")
