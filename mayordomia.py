@@ -1069,10 +1069,26 @@ with p_fil:
         with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
-        with st.expander("🔄 Ver Movimientos Internos de Tesorería (Traspasos Caja ↔ Banco)", expanded=False):
-            df_trasp = leer_tabla_turso("SELECT id AS 'Nº', fecha AS 'Fecha', origen AS 'Origen', destino AS 'Destino', importe AS 'Importe (€)', concepto AS 'Motivo / Concepto' FROM traspasos_internos ORDER BY id DESC")
+        with st.expander("🔄 Ver / Gestionar Movimientos Internos de Tesorería (Caja ↔ Banco)", expanded=False):
+            df_trasp = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos ORDER BY id DESC")
             if not df_trasp.empty:
-                st.dataframe(df_trasp, use_container_width=True, hide_index=True)
+                for _, ft in df_trasp.iterrows():
+                    tid = int(ft['id'])
+                    c1, c2, c3, c4 = st.columns([2, 3, 2, 1])
+                    c1.write(f"**#{tid}** | {str(ft['fecha'])[:10]}")
+                    c2.write(f"{ft['origen']} ➡️ {ft['destino']} | {ft['concepto']}")
+                    c3.write(f"**{float(ft['importe']):,.2f} €**")
+                    with c4.popover("⚙️"):
+                        n_orig = st.selectbox("Origen", ["Caja", "Banco"], index=0 if ft['origen'] == "Caja" else 1, key=f"to_{tid}")
+                        n_dest = st.selectbox("Destino", ["Banco", "Caja"], index=0 if ft['destino'] == "Banco" else 1, key=f"td_{tid}")
+                        n_imp = st.number_input("Importe (€)", value=float(ft['importe']), min_value=0.01, step=10.0, key=f"ti_{tid}")
+                        n_conc = st.text_input("Motivo", value=str(ft['concepto']), key=f"tc_{tid}")
+                        if st.button("💾 Guardar", key=f"tsave_{tid}", use_container_width=True):
+                            ejecutar_turso_http("UPDATE traspasos_internos SET origen=?, destino=?, importe=?, concepto=? WHERE id=?", [n_orig, n_dest, n_imp, n_conc, tid])
+                            st.rerun()
+                        if st.button("🗑️ Borrar", key=f"tdel_{tid}", use_container_width=True):
+                            ejecutar_turso_http("DELETE FROM traspasos_internos WHERE id=?", [tid])
+                            st.rerun()
             else:
                 st.info("No hay traspasos internos registrados.")
 
