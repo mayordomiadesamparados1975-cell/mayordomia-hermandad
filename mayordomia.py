@@ -1390,6 +1390,7 @@ with p_con:
                                 st.cache_data.clear(); st.rerun()
         st.divider()
         st.subheader("🕰️ Visor Histórico de Ejercicios Anteriores (Solo Lectura)")
+        st.caption("Sube el archivo 'datos_hermandad.json' o el '.ZIP' de copia de seguridad para consultarlo sin alterar la contabilidad actual.")
         arch_hist = st.file_uploader("Seleccionar respaldo (.json o .zip)", type=["json", "zip"], key="visor_hist_up")
 
         if arch_hist is not None:
@@ -1399,22 +1400,37 @@ with p_con:
                         datos_h = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
                 else:
                     datos_h = json.loads(arch_hist.read().decode("utf-8"))
-                cols_t, rows_t = ejecutar_turso_http("SELECT name FROM sqlite_master WHERE type='table'")
-                st.write("Tablas reales en Turso:", [r[0] for r in rows_t])
-
-                st.write("Tablas detectadas:", list(datos_h.keys()))
 
                 if "contabilidad" in datos_h:
                     df_h = pd.DataFrame(datos_h["contabilidad"]["rows"], columns=datos_h["contabilidad"]["cols"])
-                    st.dataframe(df_h, use_container_width=True, hide_index=True)
+                    if "eliminado" in df_h.columns:
+                        df_h = df_h[df_h["eliminado"].fillna(0) == 0]
 
-                st.subheader("🔄 Traspasos Internos de Tesorería")
+                    ing_h = df_h[df_h["tipo"] == "Ingreso"]["importe"].astype(float).sum() if not df_h.empty else 0.0
+                    gas_h = df_h[df_h["tipo"] == "Gasto"]["importe"].astype(float).sum() if not df_h.empty else 0.0
+
+                    c_h1, c_h2, c_h3 = st.columns(3)
+                    c_h1.metric("Ingresos Históricos", f"{ing_h:,.2f} €")
+                    c_h2.metric("Gastos Históricos", f"{gas_h:,.2f} €")
+                    c_h3.metric("Resultado Neto", f"{(ing_h - gas_h):,.2f} €")
+
+                    filtro_h = st.text_input("🔍 Filtrar apuntes históricos (por concepto, proveedor o partida):", key="filtro_hist")
+                    if filtro_h and not df_h.empty:
+                        mask = df_h.astype(str).apply(lambda x: x.str.contains(filtro_h, case=False, na=False)).any(axis=1)
+                        df_h = df_h[mask]
+
+                    cols_ver = [c for c in ["id", "fecha", "tipo", "origen_destino", "partida", "proveedor", "concepto", "forma_pago", "importe"] if c in df_h.columns]
+                    st.dataframe(df_h[cols_ver], use_container_width=True, hide_index=True)
+
                 if "traspasos_internos" in datos_h and len(datos_h["traspasos_internos"].get("rows", [])) > 0:
-                    df_th = pd.DataFrame(datos_h["traspasos_internos"]["rows"], columns=datos_h["traspasos_internos"]["cols"])
-                    st.dataframe(df_th, use_container_width=True, hide_index=True)
-                else:
-                    st.info(f"Sin filas en traspasos_internos. Detalle: {datos_h.get('traspasos_internos', 'No existe la clave')}")
+                    with st.expander("🔄 Movimientos Internos de Tesorería del Respaldo (Caja ↔ Banco)", expanded=True):
+                        df_th = pd.DataFrame(datos_h["traspasos_internos"]["rows"], columns=datos_h["traspasos_internos"]["cols"])
+                        for _, ft in df_th.iterrows():
+                            with st.container(border=True):
+                                ct1, ct2, ct3, ct4 = st.columns([1.2, 2.5, 4, 1.5])
+                                ct1.markdown(f"**#{ft.get('id', '')}** · `{str(ft.get('fecha', ''))[:10]}`")
+                                ct2.markdown(f"**{ft.get('origen', '')}** ➡️ **{ft.get('destino', '')}**")
+                                ct3.write(str(ft.get('concepto', '')))
+                                ct4.markdown(f"<div style='text-align:right; color:#800020; font-weight:bold; font-size:1.05em;'>{float(ft.get('importe', 0)):,.2f} €</div>", unsafe_allow_html=True)
             except Exception as e:
-                st.error(f"Error al leer el archivo: {e}")
-
-        
+                st.error(f"No se pudo leer el archivo histórico: {e}")
