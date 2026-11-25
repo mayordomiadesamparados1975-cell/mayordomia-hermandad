@@ -247,7 +247,7 @@ def generar_excel(df, agrupar=False):
 def generar_backup_zip():
     buf = io.BytesIO()
     excel_buf = io.BytesIO()
-    tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema"]
+    tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "traspasos_internos"]
     respaldo = {}
     with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
         for t in tablas:
@@ -267,7 +267,7 @@ def generar_backup_zip():
 def restaurar_backup_zip(archivo_zip):
     with zipfile.ZipFile(archivo_zip, "r") as zf:
         respaldo = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
-        for t in ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "archivos_nube"]:
+        for t in ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "traspasos_internos", "archivos_nube"]:
             ejecutar_turso_http(f"DELETE FROM {t}")
         for t, contenido in respaldo.items():
             cols = contenido["cols"]
