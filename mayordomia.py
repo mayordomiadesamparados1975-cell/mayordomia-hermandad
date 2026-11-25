@@ -1078,7 +1078,7 @@ with p_fil:
         with cb1: st.download_button(label="👑 Imprimir Extracto Horizontal en PDF", data=generar_pdf_resumen(df_f, subtitulo_pdf, agrupar=agrupar_conceptos), file_name="Extracto_Horizontal_Desamparados.pdf", mime="application/pdf", use_container_width=True)
         with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)        
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
-        dibujar_tabla_movimientos(df_f)
+            dibujar_tabla_movimientos(df_f)
 
         # BORRA DESDE AQUÍ 👇
         with st.expander("🔄 Movimientos Internos de Tesorería (Traspasos Caja ↔ Banco)", expanded=False):
