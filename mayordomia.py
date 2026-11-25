@@ -1076,12 +1076,18 @@ with p_fil:
         with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
-        with st.expander("🔄 Ver Movimientos Internos de Tesorería (Caja ↔ Banco)", expanded=True):
+        with st.expander("🔄 Movimientos Internos de Tesorería (Traspasos Caja ↔ Banco)", expanded=False):
             df_trasp = leer_tabla_turso("SELECT * FROM traspasos_internos ORDER BY id DESC")
             if not df_trasp.empty:
-                st.dataframe(df_trasp, use_container_width=True, hide_index=True)
+                for _, ft in df_trasp.iterrows():
+                    with st.container(border=True):
+                        ct1, ct2, ct3, ct4 = st.columns([1.2, 2.5, 4, 1.5])
+                        ct1.markdown(f"**#{ft.get('id', '')}** · `{str(ft.get('fecha', ''))[:10]}`")
+                        ct2.markdown(f"**{ft.get('origen', '')}** ➡️ **{ft.get('destino', '')}**")
+                        ct3.write(str(ft.get('concepto', '')))
+                        ct4.markdown(f"<div style='text-align:right; color:#800020; font-weight:bold; font-size:1.05em;'>{float(ft.get('importe', 0)):,.2f} €</div>", unsafe_allow_html=True)
             else:
-                st.info("La tabla traspasos_internos está vacía en este momento.")
+                st.info("No hay traspasos internos registrados.")
 
     else:
         st.info("No hay movimientos que coincidan con los filtros seleccionados.")
