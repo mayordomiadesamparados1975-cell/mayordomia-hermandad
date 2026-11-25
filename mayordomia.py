@@ -1393,6 +1393,8 @@ with p_con:
                         datos_h = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
                 else:
                     datos_h = json.loads(arch_hist.read().decode("utf-8"))
+                cols_t, rows_t = ejecutar_turso_http("SELECT name FROM sqlite_master WHERE type='table'")
+                st.write("Tablas reales en Turso:", [r[0] for r in rows_t])
 
                 st.write("Tablas detectadas:", list(datos_h.keys()))
 
