@@ -1076,12 +1076,12 @@ with p_fil:
         with cb2: st.download_button(label="📊 Exportar Tabla a Excel (.xlsx)", data=generar_excel(df_f, agrupar=agrupar_conceptos), file_name="Contabilidad_Desamparados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
-        with st.expander("🔄 Ver Movimientos Internos de Tesorería (Traspasos Caja ↔ Banco)", expanded=False):
-            df_trasp = leer_tabla_turso("SELECT id AS 'Nº', fecha AS 'Fecha', origen AS 'Origen', destino AS 'Destino', importe AS 'Importe (€)', concepto AS 'Motivo / Concepto' FROM traspasos_internos ORDER BY id DESC")
+        with st.expander("🔄 Ver Movimientos Internos de Tesorería (Caja ↔ Banco)", expanded=True):
+            df_trasp = leer_tabla_turso("SELECT * FROM traspasos_internos ORDER BY id DESC")
             if not df_trasp.empty:
                 st.dataframe(df_trasp, use_container_width=True, hide_index=True)
             else:
-                st.info("No hay traspasos internos registrados.")
+                st.info("La tabla traspasos_internos está vacía en este momento.")
 
     else:
         st.info("No hay movimientos que coincidan con los filtros seleccionados.")
