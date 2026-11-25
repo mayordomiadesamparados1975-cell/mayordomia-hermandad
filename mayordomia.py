@@ -273,6 +273,8 @@ def restaurar_backup_zip(archivo_zip):
         for t in ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "traspasos_internos", "archivos_nube"]:
             ejecutar_turso_http(f"DELETE FROM {t}")
         for t, contenido in respaldo.items():
+            if not contenido.get("rows"):
+                continue
             cols = contenido["cols"]
             placeholders = ", ".join(["?"] * len(cols))
             col_names = ", ".join(cols)
@@ -283,6 +285,7 @@ def restaurar_backup_zip(archivo_zip):
                 nom_real = item.replace("tickets/", "", 1)
                 b64_str = base64.b64encode(zf.read(item)).decode("utf-8")
                 ejecutar_turso_http("INSERT OR REPLACE INTO archivos_nube (nombre, datos_b64) VALUES (?, ?)", (nom_real, b64_str))
+
 def mostrar_panel_respaldos(df_global):
     st.markdown("---")
     st.markdown("**🛡️ Copias de Seguridad y Restauración**")
