@@ -1354,7 +1354,7 @@ with p_con:
         if df_p.empty:
             st.caption("No hay partidas registradas.")
         else:
-            with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=True):
+            with st.expander("Desplegar / Ocultar Catálogo de Conceptos", expanded=False):
                 for _, r_p in df_p.iterrows():
                     pid = r_p.get('id'); ptipo = r_p.get('tipo'); pnom = r_p.get('nombre')
                     with st.container(border=True):
