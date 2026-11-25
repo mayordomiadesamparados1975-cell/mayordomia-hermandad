@@ -250,7 +250,6 @@ def generar_backup_zip():
     tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "traspasos_internos"]
     respaldo = {}
     with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
-    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
         for t in tablas:
             try:
                 cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
@@ -258,6 +257,7 @@ def generar_backup_zip():
                 pd.DataFrame(rows, columns=cols).to_excel(writer, sheet_name=t[:31], index=False)
             except Exception as e:
                 respaldo[t] = {"cols": [], "rows": [], "error": str(e)}
+    _, archivos = ejecutar_turso_http("SELECT nombre, datos_b64 FROM archivos_nube")
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("datos_hermandad.json", json.dumps(respaldo, ensure_ascii=False, indent=2))
         zf.writestr("Contabilidad_Completa_Desamparados.xlsx", excel_buf.getvalue())
