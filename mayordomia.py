@@ -242,14 +242,18 @@ def generar_excel(df, agrupar=False):
     buf.seek(0); return buf
 def generar_backup_zip():
     buf = io.BytesIO()
+    excel_buf = io.BytesIO()
     tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema"]
     respaldo = {}
-    for t in tablas:
-        cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
-        respaldo[t] = {"cols": cols, "rows": rows}
+    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+        for t in tablas:
+            cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
+            respaldo[t] = {"cols": cols, "rows": rows}
+            pd.DataFrame(rows, columns=cols).to_excel(writer, sheet_name=t[:31], index=False)
     _, archivos = ejecutar_turso_http("SELECT nombre, datos_b64 FROM archivos_nube")
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("datos_hermandad.json", json.dumps(respaldo, ensure_ascii=False, indent=2))
+        zf.writestr("Contabilidad_Completa_Desamparados.xlsx", excel_buf.getvalue())
         for nom, b64 in archivos:
             if nom and b64:
                 zf.writestr(f"tickets/{nom}", base64.b64decode(b64))
