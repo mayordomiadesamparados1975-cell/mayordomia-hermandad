@@ -46,7 +46,11 @@ def ejecutar_turso_http(sql, params=()):
         elif isinstance(p, float): args.append({"type": "float", "value": p})
         else: args.append({"type": "text", "value": str(p)})
     payload = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
-    r = obtener_sesion_http().post(url, json=payload, timeout=15)
+    try:
+        r = obtener_sesion_http().post(url, json=payload, timeout=15)
+    except requests.exceptions.RequestException:
+        obtener_sesion_http.clear()
+        r = obtener_sesion_http().post(url, json=payload, timeout=15)
     r.raise_for_status()
     res = itemgetter(0)(r.json()["results"])["response"]["result"]
     cols = [c["name"] for c in res.get("cols", list())]
