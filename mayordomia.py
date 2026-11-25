@@ -250,11 +250,14 @@ def generar_backup_zip():
     tablas = ["contabilidad", "partidas_personalizadas", "saldos_iniciales", "presupuestos", "config_sistema", "traspasos_internos"]
     respaldo = {}
     with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
+    with pd.ExcelWriter(excel_buf, engine="openpyxl") as writer:
         for t in tablas:
-            cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
-            respaldo[t] = {"cols": cols, "rows": rows}
-            pd.DataFrame(rows, columns=cols).to_excel(writer, sheet_name=t[:31], index=False)
-    _, archivos = ejecutar_turso_http("SELECT nombre, datos_b64 FROM archivos_nube")
+            try:
+                cols, rows = ejecutar_turso_http(f"SELECT * FROM {t}")
+                respaldo[t] = {"cols": cols, "rows": rows}
+                pd.DataFrame(rows, columns=cols).to_excel(writer, sheet_name=t[:31], index=False)
+            except Exception as e:
+                respaldo[t] = {"cols": [], "rows": [], "error": str(e)}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("datos_hermandad.json", json.dumps(respaldo, ensure_ascii=False, indent=2))
         zf.writestr("Contabilidad_Completa_Desamparados.xlsx", excel_buf.getvalue())
@@ -1413,9 +1416,12 @@ with p_con:
 
                     st.dataframe(df_h, use_container_width=True, hide_index=True)
 
-                if "traspasos_internos" in datos_h and datos_h["traspasos_internos"]["rows"]:
-                    with st.expander("🔄 Ver Traspasos Internos del Respaldo"):
-                        df_th = pd.DataFrame(datos_h["traspasos_internos"]["rows"], columns=datos_h["traspasos_internos"]["cols"])
-                        st.dataframe(df_th, use_container_width=True, hide_index=True)
+                st.subheader("🔄 Traspasos Internos de Tesorería (Caja ↔ Banco)")
+                if "traspasos_internos" in datos_h and len(datos_h["traspasos_internos"].get("rows", [])) > 0:
+                    df_th = pd.DataFrame(datos_h["traspasos_internos"]["rows"], columns=datos_h["traspasos_internos"]["cols"])
+                    st.dataframe(df_th, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hay traspasos internos registrados en este archivo.")
+
             except Exception as e:
                 st.error(f"No se pudo leer el archivo histórico: {e}")
