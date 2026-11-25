@@ -1080,26 +1080,11 @@ with p_fil:
         with st.expander(f"📋 Desplegar / Ocultar Listado de Movimientos ({len(df_f)} apuntes encontrados)", expanded=False):
             dibujar_tabla_movimientos(df_f)
 
-        # BORRA DESDE AQUÍ 👇
-        with st.expander("🔄 Movimientos Internos de Tesorería (Traspasos Caja ↔ Banco)", expanded=False):
-            df_trasp = leer_tabla_turso("SELECT * FROM traspasos_internos ORDER BY id DESC")
-            if not df_trasp.empty:
-                for _, ft in df_trasp.iterrows():
-                    with st.container(border=True):
-                        ct1, ct2, ct3, ct4 = st.columns([1.2, 2.5, 4, 1.5])
-                        ct1.markdown(f"**#{ft.get('id', '')}** · `{str(ft.get('fecha', ''))[:10]}`")
-                        ct2.markdown(f"**{ft.get('origen', '')}** ➡️ **{ft.get('destino', '')}**")
-                        ct3.write(str(ft.get('concepto', '')))
-                        ct4.markdown(f"<div style='text-align:right; color:#800020; font-weight:bold; font-size:1.05em;'>{float(ft.get('importe', 0)):,.2f} €</div>", unsafe_allow_html=True)
-            else:
-                st.info("No hay traspasos internos registrados.")
-        # HASTA AQUÍ 👆
-
-
     else:
         st.info("No hay movimientos que coincidan con los filtros seleccionados.")
 
     st.markdown("---")
+
     st.markdown("#### 🔄 Auditoría de Movimientos Internos de Tesorería")
     df_t_vista = leer_tabla_turso("SELECT id, fecha, origen, destino, importe, concepto FROM traspasos_internos")
     with st.expander(f"📋 Ver Historial de Traspasos Internos de Fondos ({len(df_t_vista)} movimientos registrados)", expanded=False):
