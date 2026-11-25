@@ -1319,7 +1319,7 @@ with p_con:
                     st.cache_data.clear()
                     st.success(f"Se han eliminado {borradas} partidas antiguas."); st.rerun()
         c_tipo = st.selectbox("Asociar nueva partida a:", ["Ingreso", "Gasto"], key="new_part_tipo")
-        c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: 72200003 - Venta de dulces")
+        c_nombre = st.text_input("Nombre de la nueva partida:", placeholder="Ej: DH1 - Cuota de Hermanos")
         if st.button("Guardar Nueva Partida", use_container_width=True):
             if not c_nombre.strip():
                 st.error("Escriba el nombre de la partida.")
