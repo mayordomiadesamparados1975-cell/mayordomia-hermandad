@@ -1393,6 +1393,9 @@ with p_con:
                 if arch_hist.name.endswith(".zip"):
                     with zipfile.ZipFile(arch_hist, "r") as zf:
                         datos_h = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
+                st.write("Tablas dentro del archivo:", list(datos_h.keys()))
+                if "traspasos_internos" in datos_h:
+                    st.write("Contenido traspasos:", datos_h["traspasos_internos"])
                 else:
                     datos_h = json.loads(arch_hist.read().decode("utf-8"))
 
