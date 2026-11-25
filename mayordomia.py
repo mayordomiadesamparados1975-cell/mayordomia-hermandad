@@ -1382,10 +1382,8 @@ with p_con:
                                 cur.execute("DELETE FROM partidas_personalizadas WHERE id = ?", (pid,))
                                 conn.commit(); conn.sync()
                                 st.cache_data.clear(); st.rerun()
-
         st.divider()
         st.subheader("🕰️ Visor Histórico de Ejercicios Anteriores (Solo Lectura)")
-        st.caption("Sube el archivo 'datos_hermandad.json' o el '.ZIP' de copia de seguridad de un ejercicio cerrado para consultarlo sin alterar la contabilidad actual.")
         arch_hist = st.file_uploader("Seleccionar respaldo (.json o .zip)", type=["json", "zip"], key="visor_hist_up")
 
         if arch_hist is not None:
@@ -1393,38 +1391,22 @@ with p_con:
                 if arch_hist.name.endswith(".zip"):
                     with zipfile.ZipFile(arch_hist, "r") as zf:
                         datos_h = json.loads(zf.read("datos_hermandad.json").decode("utf-8"))
-                st.write("Tablas dentro del archivo:", list(datos_h.keys()))
-                if "traspasos_internos" in datos_h:
-                    st.write("Contenido traspasos:", datos_h["traspasos_internos"])
                 else:
                     datos_h = json.loads(arch_hist.read().decode("utf-8"))
 
+                st.write("Tablas detectadas:", list(datos_h.keys()))
+
                 if "contabilidad" in datos_h:
                     df_h = pd.DataFrame(datos_h["contabilidad"]["rows"], columns=datos_h["contabilidad"]["cols"])
-                    if "eliminado" in df_h.columns:
-                        df_h = df_h[df_h["eliminado"].fillna(0) == 0]
-
-                    ing_h = df_h[df_h["tipo"] == "Ingreso"]["importe"].astype(float).sum() if not df_h.empty else 0.0
-                    gas_h = df_h[df_h["tipo"] == "Gasto"]["importe"].astype(float).sum() if not df_h.empty else 0.0
-
-                    c_h1, c_h2, c_h3 = st.columns(3)
-                    c_h1.metric("Ingresos Históricos", f"{ing_h:,.2f} €")
-                    c_h2.metric("Gastos Históricos", f"{gas_h:,.2f} €")
-                    c_h3.metric("Resultado Neto", f"{(ing_h - gas_h):,.2f} €")
-
-                    filtro_h = st.text_input("🔍 Filtrar apuntes históricos (por concepto, proveedor o partida):", key="filtro_hist")
-                    if filtro_h and not df_h.empty:
-                        mask = df_h.astype(str).apply(lambda x: x.str.contains(filtro_h, case=False, na=False)).any(axis=1)
-                        df_h = df_h[mask]
-
                     st.dataframe(df_h, use_container_width=True, hide_index=True)
 
-                st.subheader("🔄 Traspasos Internos de Tesorería (Caja ↔ Banco)")
+                st.subheader("🔄 Traspasos Internos de Tesorería")
                 if "traspasos_internos" in datos_h and len(datos_h["traspasos_internos"].get("rows", [])) > 0:
                     df_th = pd.DataFrame(datos_h["traspasos_internos"]["rows"], columns=datos_h["traspasos_internos"]["cols"])
                     st.dataframe(df_th, use_container_width=True, hide_index=True)
                 else:
-                    st.info("No hay traspasos internos registrados en este archivo.")
-
+                    st.info(f"Sin filas en traspasos_internos. Detalle: {datos_h.get('traspasos_internos', 'No existe la clave')}")
             except Exception as e:
-                st.error(f"No se pudo leer el archivo histórico: {e}")
+                st.error(f"Error al leer el archivo: {e}")
+
+        
