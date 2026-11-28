@@ -998,6 +998,68 @@ with p_reg:
                 conn.commit(); conn.sync()
                 st.cache_data.clear()
                 st.success("¡Traspaso interno asentado en las cuentas!"); st.rerun()
+    st.markdown("---")
+    with st.expander("📋 Importar Borrador de Mayordomía desde Excel (Pasar Hojas de Papel en Bloque)", expanded=False):
+        st.caption("Descarga la plantilla, rellena en Excel los apuntes anotados a mano en Mayordomía y súbelos todos de golpe.")
+        
+        df_plantilla_borrador = pd.DataFrame([{
+            "Fecha (AAAA-MM-DD)": datetime.now().strftime("%Y-%m-%d"),
+            "Tipo (Ingreso/Gasto)": "Ingreso",
+            "Cuenta (Caja/Banco)": "Caja",
+            "Partida": "DH1 - Cuota de Hermanos",
+            "Proveedor_Hermano": "Juan Pérez Gómez",
+            "Num_Factura": "",
+            "Detalle": "Cuota anual 2026",
+            "Forma_Pago": "Efectivo",
+            "Importe": 25.00
+        }])
+        buf_pb = io.BytesIO()
+        with pd.ExcelWriter(buf_pb, engine="openpyxl") as writer:
+            df_plantilla_borrador.to_excel(writer, index=False, sheet_name="Borrador_Mayordomia")
+        st.download_button(
+            label="📥 Descargar Plantilla Excel para Borrador de Mayordomía",
+            data=buf_pb.getvalue(),
+            file_name="Plantilla_Borrador_Mayordomia.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+        excel_borrador = st.file_uploader("Subir archivo Excel del borrador cumplimentado (.xlsx):", type=["xlsx"], key="up_excel_borrador")
+        if excel_borrador is not None:
+            try:
+                df_b = pd.read_excel(excel_borrador).dropna(how="all")
+                st.dataframe(df_b, use_container_width=True, hide_index=True)
+                if st.button(f"🚀 Volcar {len(df_b)} apuntes del borrador a la Contabilidad", use_container_width=True, key="btn_volcar_borrador"):
+                    if comprobar_bloqueo_concurrencia(quien_opera):
+                        st.warning("Otro usuario está operando en este momento. Espera unos segundos.")
+                    else:
+                        registrar_presencia_usuario(quien_opera, "Importación Borrador Excel")
+                        conn = conectar_bd(); cursor = conn.cursor()
+                        insertados = 0
+                        for _, fila in df_b.iterrows():
+                            imp_val = float(str(fila.get("Importe", 0)).replace(",", "."))
+                            if imp_val <= 0:
+                                continue
+                            f_str = str(fila.get("Fecha (AAAA-MM-DD)", datetime.now().strftime("%Y-%m-%d")))[:10] + " 12:00"
+                            t_val = str(fila.get("Tipo (Ingreso/Gasto)", "Ingreso")).strip().capitalize()
+                            c_val = str(fila.get("Cuenta (Caja/Banco)", "Caja")).strip().capitalize()
+                            p_val = str(fila.get("Partida", "DH1 - Cuota de Hermanos")).strip()
+                            pr_val = str(fila.get("Proveedor_Hermano", "") if pd.notna(fila.get("Proveedor_Hermano")) else "").strip()
+                            nf_val = str(fila.get("Num_Factura", "") if pd.notna(fila.get("Num_Factura")) else "").strip()
+                            dt_val = str(fila.get("Detalle", "") if pd.notna(fila.get("Detalle")) else "").strip() or p_val
+                            fp_val = str(fila.get("Forma_Pago", "Efectivo")).strip()
+                            cursor.execute(
+                                "INSERT INTO contabilidad (fecha, tipo, origen_destino, partida, proveedor, num_factura, concepto, forma_pago, importe, comprobante, eliminado, pendiente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0)",
+                                (f_str, t_val, c_val, p_val, pr_val, nf_val, dt_val, fp_val, imp_val)
+                            )
+                            insertados += 1
+                        conn.commit(); conn.sync()
+                        st.cache_data.clear()
+                        st.success(f"¡{insertados} apuntes grabados correctamente!")
+                        st.rerun()
+            except Exception as e:
+                st.error(f"Error al leer el Excel del borrador: {e}")
+
 with p_fil:
     with st.container(border=True):
         cf1, cf2, cf3, cf4 = st.columns(4)
