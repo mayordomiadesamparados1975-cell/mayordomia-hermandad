@@ -533,7 +533,7 @@ def generar_informe_arzobispado(df_global, dict_pres):
     def construir_pdf_palacio(desarrollado=False):
         b_pdf = io.BytesIO()
         doc = SimpleDocTemplate(b_pdf, pagesize=letter, rightMargin=28, leftMargin=28, topMargin=25, bottomMargin=25)
-        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_cab = colors.HexColor("#D1D5DB"); gris_suave = colors.HexColor("#F3F4F6")
+        story = list(); styles = getSampleStyleSheet(); burdeos = colors.HexColor("#800020"); gris_cab = colors.Color(0.82, 0.84, 0.86, alpha=0.38); gris_suave = colors.Color(0.95, 0.96, 0.97, alpha=0.30)
         n_st = ParagraphStyle('N', parent=styles['Normal'], fontSize=7.6, leading=9.5)
         n_der = ParagraphStyle('ND', parent=styles['Normal'], fontSize=7.6, leading=9.5, alignment=2)
         n_cen = ParagraphStyle('NC', parent=styles['Normal'], fontSize=7.6, leading=9.5, alignment=1)
